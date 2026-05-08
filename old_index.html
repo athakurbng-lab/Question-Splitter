@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QA Flashcards</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --accent-glow: rgba(99, 102, 241, 0.5);
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: rgba(255, 255, 255, 0.08);
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.15) 0px, transparent 50%);
+            background-attachment: fixed;
+            box-sizing: border-box;
+        }
+
+        *, *::before, *::after {
+            box-sizing: inherit;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            z-index: 1;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            margin: 0 0 0.5rem 0;
+            background: linear-gradient(135deg, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.025em;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            margin: 0;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        textarea {
+            width: 100%;
+            height: 250px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            padding: 1.5rem;
+            font-size: 1.05rem;
+            line-height: 1.5;
+            resize: vertical;
+            margin-bottom: 1.5rem;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #8b5cf6);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px var(--accent-glow);
+        }
+
+        .flashcard-view {
+            display: none;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .progress {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        #progressText {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #e2e8f0;
+            background: rgba(255,255,255,0.1);
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        .jump-input {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--card-border);
+            color: white;
+            border-radius: 8px;
+            padding: 0.4rem 0.5rem;
+            width: 70px;
+            text-align: center;
+            font-size: 0.9rem;
+            font-family: inherit;
+        }
+
+        select.jump-input {
+            width: auto;
+            max-width: 150px;
+            text-align: left;
+            cursor: pointer;
+            text-overflow: ellipsis;
+        }
+
+        .jump-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .settings {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .secondary-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .secondary-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .toggle-label:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .flashcard {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 3.5rem 2.5rem 2.5rem;
+            min-height: 350px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .q-number {
+            position: absolute;
+            top: 1.25rem;
+            left: 1.25rem;
+            font-size: 1rem;
+            color: #818cf8;
+            font-weight: 800;
+            background: rgba(99, 102, 241, 0.1);
+            padding: 0.3rem 0.8rem;
+            border-radius: 8px;
+        }
+
+        .card-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            font-size: 1.4rem;
+            font-weight: 500;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            margin: 0;
+        }
+
+        .answer-content {
+            color: #c084fc;
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px dashed rgba(255, 255, 255, 0.15);
+            display: none;
+            font-size: 1.25rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .answer-content.visible {
+            display: block;
+            animation: fadeIn 0.4s ease forwards;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .btn-nav {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 140px;
+        }
+
+        .btn-nav:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px var(--accent-glow);
+        }
+
+        .btn-prev {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-prev:hover {
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: none;
+        }
+
+        .hint {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        kbd {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            padding: 0.2rem 0.5rem;
+            font-family: monospace;
+            color: #e2e8f0;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animating {
+            animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes pop {
+            0% { transform: scale(0.97); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        @media (max-width: 600px) {
+            .top-bar { flex-direction: column; align-items: stretch; }
+            .settings { justify-content: space-between; }
+            .controls { flex-direction: column-reverse; }
+            .controls button { width: 100%; }
+            .hint { display: none; }
+            .flashcard { padding: 3rem 1.5rem 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>QA Flashcards</h1>
+        <p>Turn your text into interactive study cards instantly.</p>
+    </div>
+
+    <!-- Input Panel -->
+    <div class="panel" id="inputPanel">
+        <textarea id="inputText" placeholder="Paste your text here...
+
+Example:
+Q1. What is the capital of France?
+Ans: Paris
+
+Q2. What is 2+2?
+Ans: 4"></textarea>
+        <button class="btn-primary" onclick="parseText()">✨ Process & Start</button>
+    </div>
+
+    <!-- Flashcard Panel -->
+    <div class="panel flashcard-view" id="flashcardPanel">
+        <div class="top-bar">
+            <div class="progress">
+                <span id="progressText">1 / 20</span>
+                <input type="number" id="jumpInput" class="jump-input" min="1" placeholder="Jump" title="Jump to question (Press Enter)">
+                <select id="sectionSelect" class="jump-input" title="Filter by section">
+                    <option value="All">All Sections</option>
+                </select>
+            </div>
+            <div class="settings">
+                <label class="toggle-label" title="Show questions only, skip answers">
+                    <input type="checkbox" id="qOnlyToggle"> Q-Only
+                </label>
+                <button class="secondary-btn" id="shuffleBtn" onclick="shuffleQuestions()" title="Shuffle questions">🔀 Shuffle</button>
+                <button class="secondary-btn" onclick="editMode()" title="Go back to edit text">✏️ Edit</button>
+            </div>
+        </div>
+
+        <div class="flashcard" id="cardArea">
+            <div class="q-number" id="qNumberDisplay">Q1.</div>
+            <div class="card-content" id="questionArea">Question text goes here...</div>
+            <div class="answer-content" id="answerArea">Answer text goes here...</div>
+        </div>
+
+        <div class="controls">
+            <button class="btn-nav btn-prev" onclick="handlePrev()">← Previous</button>
+            <div class="hint">Press <kbd>Space</kbd> or <kbd>Enter</kbd> for next</div>
+            <button class="btn-nav" id="nextBtn" onclick="handleNext()">Show Answer →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let allQuestions = [];
+    let questions = [];
+    let sections = new Set();
+    let currentIndex = 0;
+    let showingAnswer = false;
+    let qOnlyMode = false;
+
+    async function parseText() {
+        const text = document.getElementById('inputText').value;
+        const processBtn = document.querySelector('.btn-primary');
+        const originalBtnText = processBtn.innerHTML;
+        
+        let rawText = text;
+
+        const gdocMatch = text.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9-_]+)/);
+        
+        if (gdocMatch) {
+            const docId = gdocMatch[1];
+            processBtn.innerHTML = '⏳ Fetching Document...';
+            processBtn.disabled = true;
+            try {
+                // We use format=txt to get raw text, and api.codetabs.com as a CORS proxy since browsers block direct access
+                const exportUrl = `https://docs.google.com/document/export?format=txt&id=${docId}`;
+                const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(exportUrl)}`;
+                const response = await fetch(proxyUrl);
+                if (!response.ok) throw new Error('Failed to fetch document');
+                rawText = await response.text();
+            } catch (err) {
+                alert("Error fetching Google Doc: " + err.message + "\n\n(This might happen if the CORS proxy is down or blocked. You can still copy-paste the text manually.)");
+                processBtn.innerHTML = originalBtnText;
+                processBtn.disabled = false;
+                return;
+            }
+            processBtn.innerHTML = originalBtnText;
+            processBtn.disabled = false;
+        }
+
+        // If the user pasted plain text, we check for Lec-X lines
+        const lines = rawText.split('\n');
+        rawText = lines.map(line => {
+            const trimmed = line.trim();
+            if (trimmed.match(/^Lec-\d+/i)) {
+                return `\n===SECTION_MARKER===${trimmed}===SECTION_MARKER===\n`;
+            }
+            return line;
+        }).join('\n');
+        
+        const regex = /(===SECTION_MARKER===[^=]+===SECTION_MARKER===|Q\s*\d+\s*\.)/i;
+        const tokens = rawText.split(regex);
+        
+        allQuestions = [];
+        sections = new Set();
+        let currentSec = "General";
+        
+        for (let i = 1; i < tokens.length; i += 2) {
+            const token = tokens[i].trim();
+            const content = (tokens[i+1] || "").trim();
+            
+            if (token.startsWith('===SECTION_MARKER===')) {
+                currentSec = token.replace(/===SECTION_MARKER===/g, '').trim() || "General";
+                sections.add(currentSec);
+                continue;
+            }
+            
+            const qPrefix = token.toUpperCase();
+            let questionText = "";
+            let answerText = "";
+            
+            let ansMatch = content.match(/(?:^|\n)\s*Ans\s*:/i) || content.match(/\s+Ans\s*:/i);
+            
+            if (ansMatch) {
+                questionText = content.substring(0, ansMatch.index).trim();
+                answerText = content.substring(ansMatch.index + ansMatch[0].length).trim();
+            } else {
+                questionText = content.trim();
+            }
+            
+            if (questionText || answerText) {
+                sections.add(currentSec); // ensure section is added if it has questions
+                allQuestions.push({
+                    section: currentSec,
+                    prefix: qPrefix,
+                    q: questionText,
+                    a: answerText
+                });
+            }
+        }
+        
+        if (allQuestions.length > 0) {
+            populateDropdown();
+            document.getElementById('inputPanel').style.display = 'none';
+            document.getElementById('flashcardPanel').style.display = 'flex';
+        } else {
+            alert("No questions found! Make sure to use the format 'Q1. ... Ans: ...'");
+        }
+    }
+
+    function populateDropdown() {
+        const select = document.getElementById('sectionSelect');
+        select.innerHTML = '<option value="All">All Sections</option>';
+        
+        const hasGeneralQs = allQuestions.some(q => q.section === "General");
+        
+        sections.forEach(sec => {
+            if (sec === "General" && !hasGeneralQs) return;
+            const opt = document.createElement('option');
+            opt.value = sec;
+            opt.textContent = sec;
+            select.appendChild(opt);
+        });
+        
+        select.value = "All";
+        filterQuestions("All");
+    }
+
+    function filterQuestions(section) {
+        if (section === "All") {
+            questions = [...allQuestions];
+        } else {
+            questions = allQuestions.filter(q => q.section === section);
+        }
+        currentIndex = 0;
+        
+        if (questions.length > 0) {
+            renderCard();
+        } else {
+            document.getElementById('questionArea').innerText = "No questions found in this section.";
+            document.getElementById('answerArea').innerText = "";
+            document.getElementById('progressText').innerText = "0 / 0";
+            document.getElementById('qNumberDisplay').innerText = "-";
+        }
+    }
+
+    function renderCard() {
+        if (questions.length === 0) return;
+        
+        const card = questions[currentIndex];
+        document.getElementById('progressText').innerText = `${currentIndex + 1} / ${questions.length}`;
+        document.getElementById('qNumberDisplay').innerText = card.prefix;
+        document.getElementById('questionArea').innerText = card.q || "(Empty Question)";
+        
+        const answerArea = document.getElementById('answerArea');
+        answerArea.innerText = card.a;
+        answerArea.classList.remove('visible');
+        showingAnswer = false;
+        
+        qOnlyMode = document.getElementById('qOnlyToggle').checked;
+        
+        const nextBtn = document.getElementById('nextBtn');
+        if (qOnlyMode || !card.a) {
+            nextBtn.innerText = "Next Question →";
+        } else {
+            nextBtn.innerText = "Show Answer →";
+        }
+    }
+
+    function handleNext() {
+        if (questions.length === 0) return;
+        const card = questions[currentIndex];
+        qOnlyMode = document.getElementById('qOnlyToggle').checked;
+        
+        if (!qOnlyMode && card.a && !showingAnswer) {
+            document.getElementById('answerArea').classList.add('visible');
+            showingAnswer = true;
+            document.getElementById('nextBtn').innerText = "Next Question →";
+        } else {
+            if (currentIndex < questions.length - 1) {
+                currentIndex++;
+            } else {
+                currentIndex = 0;
+            }
+            triggerAnimation();
+            renderCard();
+        }
+    }
+
+    function handlePrev() {
+        if (questions.length === 0) return;
+        if (currentIndex > 0) {
+            currentIndex--;
+        } else {
+            currentIndex = questions.length - 1;
+        }
+        triggerAnimation();
+        renderCard();
+    }
+
+    function triggerAnimation() {
+        const card = document.getElementById('cardArea');
+        card.classList.remove('animating');
+        void card.offsetWidth; // trigger reflow
+        card.classList.add('animating');
+    }
+
+    function shuffleQuestions() {
+        for (let i = questions.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [questions[i], questions[j]] = [questions[j], questions[i]];
+        }
+        currentIndex = 0;
+        triggerAnimation();
+        renderCard();
+    }
+
+    function editMode() {
+        document.getElementById('flashcardPanel').style.display = 'none';
+        document.getElementById('inputPanel').style.display = 'block';
+    }
+
+    function jumpToQuestion() {
+        const input = document.getElementById('jumpInput');
+        let val = parseInt(input.value);
+        if (!isNaN(val) && val >= 1 && val <= questions.length) {
+            currentIndex = val - 1;
+            triggerAnimation();
+            renderCard();
+        }
+        input.value = '';
+        input.blur();
+    }
+
+    document.getElementById('qOnlyToggle').addEventListener('change', () => {
+        renderCard();
+    });
+
+    document.getElementById('sectionSelect').addEventListener('change', (e) => {
+        filterQuestions(e.target.value);
+        triggerAnimation();
+    });
+
+    document.getElementById('jumpInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            jumpToQuestion();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        const inputPanel = document.getElementById('inputPanel');
+        if (inputPanel.style.display !== 'none') return;
+        
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            handleNext();
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            handlePrev();
+        }
+    });
+</script>
+</body>
+</html>

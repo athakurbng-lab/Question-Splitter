@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String            @id @default(uuid())
+  username        String            @unique
+  password_hash   String
+  history         UserLinkHistory[]
+  bookmarks       Bookmark[]
+}
+
+model SourceLink {
+  id              Int               @id @default(autoincrement())
+  url             String            @unique
+  history         UserLinkHistory[]
+  bookmarks       Bookmark[]
+}
+
+model UserLinkHistory {
+  id               String      @id @default(uuid())
+  user_id          String
+  source_link_id   Int
+  custom_name      String?
+  last_accessed_at DateTime    @default(now())
+
+  user             User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  source_link      SourceLink  @relation(fields: [source_link_id], references: [id], onDelete: Cascade)
+}
+
+model Bookmark {
+  id               String      @id @default(uuid())
+  user_id          String
+  source_link_id   Int?
+  question_number  Int?
+  question_text    String?
+
+  user             User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  source_link      SourceLink? @relation(fields: [source_link_id], references: [id], onDelete: Cascade)
+}
