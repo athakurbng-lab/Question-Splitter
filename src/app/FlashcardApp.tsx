@@ -43,10 +43,13 @@ export default function FlashcardApp() {
   }, [sourceParam])
 
   useEffect(() => {
-    if (sourceLinkId && questions.length > 0) {
-      saveResumeState(sourceLinkId, currentIndex + 1).catch(console.error)
+    if (sourceLinkId && questions.length > 0 && allQuestions.length > 0) {
+      const absoluteIndex = allQuestions.indexOf(questions[currentIndex]) + 1
+      if (absoluteIndex > 0) {
+        saveResumeState(sourceLinkId, absoluteIndex).catch(console.error)
+      }
     }
-  }, [currentIndex, sourceLinkId, questions])
+  }, [currentIndex, sourceLinkId, questions, allQuestions])
 
   const loadFromSourceId = async (id: number) => {
     setLoading(true)
@@ -225,7 +228,8 @@ export default function FlashcardApp() {
     const card = questions[currentIndex]
     try {
       if (sourceLinkId) {
-        await addBookmark({ source_link_id: sourceLinkId, question_number: currentIndex + 1 })
+        const absoluteIndex = allQuestions.indexOf(card) + 1
+        await addBookmark({ source_link_id: sourceLinkId, question_number: absoluteIndex })
       } else {
         await addBookmark({ question_text: `${card.prefix} ${card.q}\nAns: ${card.a}` })
       }
