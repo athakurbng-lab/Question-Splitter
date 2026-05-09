@@ -8,7 +8,7 @@ import { redirect } from 'next/navigation'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-default-key-for-dev'
 
-export async function register(prevState: any, formData: FormData) {
+export async function register(prevState: unknown, formData: FormData) {
   const username = formData.get('username') as string
   const password = formData.get('password') as string
 
@@ -27,7 +27,7 @@ export async function register(prevState: any, formData: FormData) {
   redirect('/dashboard')
 }
 
-export async function login(prevState: any, formData: FormData) {
+export async function login(prevState: unknown, formData: FormData) {
   const username = formData.get('username') as string
   const password = formData.get('password') as string
 
@@ -68,7 +68,7 @@ export async function getSession() {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string, username: string }
     return decoded
-  } catch (e) {
+  } catch {
     return null
   }
 }

@@ -38,9 +38,9 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <Link href="/register" className="secondary-link">
-          Don't have an account? Register here.
-        </Link>
+        <p className="secondary-link">
+          Don&apos;t have an account? <Link href="/register" style={{ display: 'inline', marginTop: 0 }}>Register</Link> here.
+        </p>
       </div>
     </div>
   )

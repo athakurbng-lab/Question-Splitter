@@ -112,7 +112,41 @@ export async function getResumeState() {
   if (!val) return null
   try {
     return JSON.parse(val) as { sourceLinkId: number, questionNumber: number }
-  } catch (e) {
+  } catch {
     return null
   }
 }
+
+export async function toggleBookmarkState(sourceLinkId: number, questionNumber: number, prefix: string, qText: string, aText: string) {
+  const session = await getSession()
+  if (!session) throw new Error('Unauthorized')
+
+  const existing = await prisma.bookmark.findFirst({
+    where: { user_id: session.userId, source_link_id: sourceLinkId, question_number: questionNumber }
+  })
+
+  if (existing) {
+    await prisma.bookmark.delete({ where: { id: existing.id } })
+    return false
+  } else {
+    await prisma.bookmark.create({
+      data: {
+        user_id: session.userId,
+        source_link_id: sourceLinkId,
+        question_number: questionNumber,
+        question_text: `${prefix} ${qText}\nAns: ${aText}`
+      }
+    })
+    return true
+  }
+}
+
+export async function getBookmarkedQuestionNumbers(sourceLinkId: number) {
+  const session = await getSession()
+  if (!session) return []
+  const bms = await prisma.bookmark.findMany({
+    where: { user_id: session.userId, source_link_id: sourceLinkId, question_number: { not: null } }
+  })
+  return bms.map(b => b.question_number as number)
+}
+

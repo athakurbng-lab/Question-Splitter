@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { addSourceLink, addToHistory, addBookmark, saveResumeState } from '@/actions/bookmarks'
+import { saveResumeState, getBookmarkedQuestionNumbers, toggleBookmarkState } from '@/actions/bookmarks'
 import { getSourceUrl } from '@/actions/sources'
 import Link from 'next/link'
 
@@ -11,15 +11,18 @@ type Question = {
   prefix: string;
   q: string;
   a: string;
+  originalNumber: number;
 }
 
 export default function FlashcardApp() {
   const searchParams = useSearchParams()
   const sourceParam = searchParams.get('source')
   const qParam = searchParams.get('q')
+  const customParam = searchParams.get('custom')
+  const urlParam = searchParams.get('url')
+  const bookmarksOnly = searchParams.get('bookmarksOnly') === 'true'
 
-  const [textInput, setTextInput] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [allQuestions, setAllQuestions] = useState<Question[]>([])
   const [questions, setQuestions] = useState<Question[]>([])
   const [sections, setSections] = useState<string[]>([])
@@ -31,92 +34,21 @@ export default function FlashcardApp() {
   
   const [sourceLinkId, setSourceLinkId] = useState<number | null>(null)
   const [animating, setAnimating] = useState(false)
+  const [bookmarkedNums, setBookmarkedNums] = useState<Set<number>>(new Set())
 
-  useEffect(() => {
-    if (sourceParam) {
-      const id = parseInt(sourceParam)
-      if (!isNaN(id)) {
-        setSourceLinkId(id)
-        loadFromSourceId(id)
-      }
-    }
-  }, [sourceParam])
-
-  useEffect(() => {
-    if (sourceLinkId && questions.length > 0 && allQuestions.length > 0) {
-      const absoluteIndex = allQuestions.indexOf(questions[currentIndex]) + 1
-      if (absoluteIndex > 0) {
-        saveResumeState(sourceLinkId, absoluteIndex).catch(console.error)
-      }
-    }
-  }, [currentIndex, sourceLinkId, questions, allQuestions])
-
-  const loadFromSourceId = async (id: number) => {
-    setLoading(true)
-    try {
-      const url = await getSourceUrl(id)
-      if (url) {
-        await processUrl(url)
-        if (qParam) {
-          const qIdx = parseInt(qParam) - 1
-          if (!isNaN(qIdx) && qIdx >= 0) {
-            setCurrentIndex(qIdx)
-          }
-        }
-      }
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
-
-  const processUrl = async (url: string) => {
+  async function fetchGDocText(url: string) {
     const docIdMatch = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9-_]+)/)
-    if (!docIdMatch) {
-      alert('Invalid Google Docs URL.')
-      return
-    }
-    const docId = docIdMatch[1]
-    const exportUrl = `https://docs.google.com/document/export?format=txt&id=${docId}`
+    if (!docIdMatch) return ''
+    const exportUrl = `https://docs.google.com/document/export?format=txt&id=${docIdMatch[1]}`
     const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(exportUrl)}`
-    
     const response = await fetch(proxyUrl)
     if (!response.ok) throw new Error('Failed to fetch document')
-    const rawText = await response.text()
-    
-    parseTextContent(rawText)
+    return await response.text()
   }
 
-  const handleProcessClick = async () => {
-    if (!textInput.trim()) return
-
-    setLoading(true)
-    try {
-      const gdocMatch = textInput.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9-_]+)/)
-      
-      if (gdocMatch) {
-        const url = gdocMatch[0]
-        try {
-          const source = await addSourceLink(`https://${url}`)
-          setSourceLinkId(source.id)
-          await addToHistory(source.id)
-        } catch(e) {
-          console.error("Not logged in or db error", e)
-        }
-        await processUrl(`https://${url}`)
-      } else {
-        setSourceLinkId(null)
-        parseTextContent(textInput)
-      }
-    } catch (err: any) {
-      alert("Error: " + err.message)
-    }
-    setLoading(false)
-  }
-
-  const parseTextContent = (rawText: string) => {
+  function parseTextContent(rawText: string, currentBookmarks: Set<number>) {
     const lines = rawText.split('\n')
-    let processedText = lines.map(line => {
+    const processedText = lines.map(line => {
       const trimmed = line.trim()
       if (trimmed.match(/^Lec-\d+/i)) {
         return `\n===SECTION_MARKER===${trimmed}===SECTION_MARKER===\n`
@@ -127,9 +59,10 @@ export default function FlashcardApp() {
     const regex = /(===SECTION_MARKER===[^=]+===SECTION_MARKER===|Q\s*\d+\s*\.)/i
     const tokens = processedText.split(regex)
     
-    const newAllQs: Question[] = []
+    let newAllQs: Question[] = []
     const newSections = new Set<string>()
     let currentSec = "General"
+    let qCounter = 1;
     
     for (let i = 1; i < tokens.length; i += 2) {
       const token = tokens[i].trim()
@@ -145,7 +78,7 @@ export default function FlashcardApp() {
       let questionText = ""
       let answerText = ""
       
-      let ansMatch = content.match(/(?:^|\n)\s*Ans\s*:/i) || content.match(/\s+Ans\s*:/i)
+      const ansMatch = content.match(/(?:^|\n)\s*Ans\s*:/i) || content.match(/\s+Ans\s*:/i)
       
       if (ansMatch && ansMatch.index !== undefined) {
         questionText = content.substring(0, ansMatch.index).trim()
@@ -155,34 +88,102 @@ export default function FlashcardApp() {
       }
       
       if (questionText || answerText) {
-        newSections.add(currentSec)
         newAllQs.push({
           section: currentSec,
           prefix: qPrefix,
           q: questionText,
-          a: answerText
+          a: answerText,
+          originalNumber: qCounter
         })
+        newSections.add(currentSec)
+        qCounter++;
       }
     }
     
-    if (newAllQs.length > 0) {
-      setAllQuestions(newAllQs)
-      setQuestions(newAllQs)
-      
+    if (bookmarksOnly) {
+      newAllQs = newAllQs.filter(q => currentBookmarks.has(q.originalNumber))
+      const filteredSections = new Set<string>()
+      newAllQs.forEach(q => filteredSections.add(q.section))
+      setSections(Array.from(filteredSections))
+    } else {
       const secArray = Array.from(newSections)
       if (newAllQs.some(q => q.section === "General") && !secArray.includes("General")) {
         secArray.unshift("General")
       }
       setSections(secArray)
-      setSelectedSection('All')
-      setCurrentIndex(0)
-      setShowingAnswer(false)
-    } else {
-      alert("No questions found! Make sure to use the format 'Q1. ... Ans: ...'")
     }
+
+    if (newAllQs.length > 0) {
+      setAllQuestions(newAllQs)
+      setQuestions(newAllQs)
+      
+      let initialIdx = 0
+      if (qParam && !bookmarksOnly) {
+        const targetQ = parseInt(qParam)
+        const idx = newAllQs.findIndex(q => q.originalNumber === targetQ)
+        if (idx !== -1) initialIdx = idx
+      }
+      
+      setSelectedSection('All')
+      setCurrentIndex(initialIdx)
+      setShowingAnswer(false)
+    }
+    setLoading(false)
   }
 
-  const triggerAnimation = () => {
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true)
+      try {
+        let rawText = ''
+        let sid = null
+        if (sourceParam) {
+          const id = parseInt(sourceParam)
+          if (!isNaN(id)) {
+            sid = id
+            setSourceLinkId(id)
+            const url = await getSourceUrl(id)
+            if (url) {
+              rawText = await fetchGDocText(url)
+            }
+          }
+        } else if (urlParam) {
+          rawText = await fetchGDocText(urlParam)
+        } else if (customParam) {
+          rawText = localStorage.getItem('temp_quiz_text') || ''
+        }
+
+        if (rawText) {
+          let bms = new Set<number>()
+          if (sid) {
+            const nums = await getBookmarkedQuestionNumbers(sid)
+            bms = new Set(nums)
+            setBookmarkedNums(bms)
+          }
+          parseTextContent(rawText, bms)
+        } else {
+          setLoading(false)
+        }
+      } catch (e) {
+        console.error(e)
+        setLoading(false)
+      }
+    }
+    init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceParam, urlParam, customParam])
+
+  // Resuming
+  useEffect(() => {
+    if (sourceLinkId && questions.length > 0 && allQuestions.length > 0) {
+      const card = questions[currentIndex]
+      if (card) {
+        saveResumeState(sourceLinkId, card.originalNumber).catch(console.error)
+      }
+    }
+  }, [currentIndex, sourceLinkId, questions, allQuestions])
+
+  function triggerAnimation() {
     setAnimating(false)
     setTimeout(() => setAnimating(true), 10)
   }
@@ -224,109 +225,109 @@ export default function FlashcardApp() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleNext, handlePrev, allQuestions.length])
 
-  const handleBookmark = async () => {
+  const handleBookmarkToggle = async () => {
     const card = questions[currentIndex]
+    if (!sourceLinkId) {
+      alert("Cannot bookmark custom text correctly without saving it properly yet.")
+      return
+    }
     try {
-      if (sourceLinkId) {
-        const absoluteIndex = allQuestions.indexOf(card) + 1
-        await addBookmark({ source_link_id: sourceLinkId, question_number: absoluteIndex })
-      } else {
-        await addBookmark({ question_text: `${card.prefix} ${card.q}\nAns: ${card.a}` })
-      }
-      alert('Bookmarked successfully!')
-    } catch (e) {
+      const isNowBookmarked = await toggleBookmarkState(sourceLinkId, card.originalNumber, card.prefix, card.q, card.a || '')
+      setBookmarkedNums(prev => {
+        const next = new Set(prev)
+        if (isNowBookmarked) next.add(card.originalNumber)
+        else next.delete(card.originalNumber)
+        return next
+      })
+    } catch {
       alert('Failed to bookmark. Are you logged in?')
     }
   }
 
+  if (loading) {
+    return <div className="container" style={{ textAlign: 'center' }}>Loading Quiz...</div>
+  }
+
   if (allQuestions.length === 0) {
     return (
-      <div className="container">
-        <div className="header" style={{ position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 0, right: 0 }}>
-            <Link href="/dashboard" className="secondary-btn" style={{ textDecoration: 'none' }}>Dashboard</Link>
-          </div>
-          <h1>QA Flashcards</h1>
-          <p>Turn your text into interactive study cards instantly.</p>
-        </div>
-
+      <div className="container" style={{ textAlign: 'center' }}>
         <div className="panel">
-          <textarea 
-            placeholder="Paste your text or Google Docs link here...
-
-Example:
-Q1. What is the capital of France?
-Ans: Paris" 
-            className="input-field" 
-            value={textInput}
-            onChange={e => setTextInput(e.target.value)}
-          />
-          <button className="btn-primary" onClick={handleProcessClick} disabled={loading}>
-            {loading ? '⏳ Processing...' : '✨ Process & Start'}
-          </button>
+          <h2>No questions found!</h2>
+          <p>We couldn&apos;t find any questions. {bookmarksOnly ? "Maybe you haven't bookmarked any?" : "Check the document format."}</p>
+          <Link href="/take-quiz" className="btn-primary">Go Back</Link>
         </div>
       </div>
     )
   }
 
   const card = questions[currentIndex]
+  const isBookmarked = bookmarkedNums.has(card?.originalNumber)
 
   return (
     <div className="container">
       <div className="header" style={{ position: 'relative', marginBottom: 0 }}>
         <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: '0.5rem' }}>
-          <button className="secondary-btn" onClick={() => setAllQuestions([])}>✏️ Edit</button>
+          <Link href={bookmarksOnly ? "/bookmarks" : "/take-quiz"} className="secondary-btn" style={{ textDecoration: 'none' }}>Back</Link>
           <Link href="/dashboard" className="secondary-btn" style={{ textDecoration: 'none' }}>Dashboard</Link>
         </div>
-        <h1 style={{ fontSize: '2rem', textAlign: 'left' }}>QA Flashcards</h1>
+        <h1 style={{ fontSize: '2rem', textAlign: 'left' }}>{bookmarksOnly ? 'Bookmarked Questions' : 'Quiz Session'}</h1>
       </div>
 
       <div className="panel flashcard-view" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '-1rem' }}>
         <div className="top-bar">
           <div className="progress">
             <span className="progress-text">{currentIndex + 1} / {questions.length}</span>
-            <input 
-              type="number" 
-              className="jump-input" 
-              min="1" 
-              max={questions.length}
-              placeholder="Jump" 
-              title="Jump to question"
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  const val = parseInt((e.target as HTMLInputElement).value)
-                  if (!isNaN(val) && val >= 1 && val <= questions.length) {
-                    setCurrentIndex(val - 1)
+            <div className="jump-container" style={{ display: 'flex', gap: '0.5rem' }}>
+              <select 
+                className="jump-input" 
+                value={currentIndex}
+                onChange={e => {
+                  const val = parseInt(e.target.value)
+                  if (!isNaN(val) && val >= 0 && val < questions.length) {
+                    setCurrentIndex(val)
                     setShowingAnswer(false)
                     triggerAnimation()
-                    ;(e.target as HTMLInputElement).value = ''
-                    ;(e.target as HTMLInputElement).blur()
                   }
-                }
-              }}
-            />
-            <select 
-              className="jump-input" 
-              value={selectedSection}
-              onChange={e => {
-                const sec = e.target.value
-                setSelectedSection(sec)
-                if (sec === 'All') {
-                  setQuestions(allQuestions)
-                } else {
-                  setQuestions(allQuestions.filter(q => q.section === sec))
-                }
-                setCurrentIndex(0)
-                setShowingAnswer(false)
-                triggerAnimation()
-              }}
-            >
-              <option value="All">All Sections</option>
-              {sections.map(sec => <option key={sec} value={sec}>{sec}</option>)}
-            </select>
+                }}
+                style={{ width: '80px' }}
+              >
+                {questions.map((q, idx) => (
+                  <option key={idx} value={idx}>{bookmarksOnly ? q.originalNumber : idx + 1}</option>
+                ))}
+              </select>
+            </div>
+            
+            {sections.length > 0 && (
+              <select 
+                className="jump-input" 
+                value={selectedSection}
+                onChange={e => {
+                  const sec = e.target.value
+                  setSelectedSection(sec)
+                  if (sec === 'All') {
+                    setQuestions(allQuestions)
+                  } else {
+                    setQuestions(allQuestions.filter(q => q.section === sec))
+                  }
+                  setCurrentIndex(0)
+                  setShowingAnswer(false)
+                  triggerAnimation()
+                }}
+              >
+                <option value="All">All Sections</option>
+                {sections.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+              </select>
+            )}
           </div>
           <div className="settings">
-            <button className="secondary-btn" onClick={handleBookmark} title="Bookmark this question">⭐ Bookmark</button>
+            <button 
+              className="secondary-btn" 
+              onClick={handleBookmarkToggle} 
+              title={isBookmarked ? "Remove bookmark" : "Bookmark this question"}
+              style={{ color: isBookmarked ? '#f59e0b' : 'inherit', borderColor: isBookmarked ? '#f59e0b' : 'inherit' }}
+            >
+              {isBookmarked ? '★ Bookmarked' : '☆ Bookmark'}
+            </button>
             <label className="toggle-label" title="Show questions only, skip answers">
               <input type="checkbox" checked={qOnlyMode} onChange={e => {
                 setQOnlyMode(e.target.checked)
@@ -349,7 +350,7 @@ Ans: Paris"
 
         {questions.length > 0 ? (
           <div className={`flashcard ${animating ? 'animating' : ''}`}>
-            <div className="q-number">{card.prefix}</div>
+            <div className="q-number">{card.prefix} (Q{card.originalNumber})</div>
             <div className="card-content">{card.q || "(Empty Question)"}</div>
             {(!qOnlyMode && showingAnswer && card.a) && (
               <div className="answer-content visible">{card.a}</div>
