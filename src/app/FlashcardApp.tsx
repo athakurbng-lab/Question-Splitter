@@ -35,6 +35,7 @@ export default function FlashcardApp() {
   const [sourceLinkId, setSourceLinkId] = useState<number | null>(null)
   const [animating, setAnimating] = useState(false)
   const [bookmarkedNums, setBookmarkedNums] = useState<Set<number>>(new Set())
+  const [attemptLaterNums, setAttemptLaterNums] = useState<Set<number>>(new Set())
 
   async function fetchGDocText(url: string) {
     const docIdMatch = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9-_]+)/)
@@ -244,6 +245,33 @@ export default function FlashcardApp() {
     }
   }
 
+  const handleAttemptLaterToggle = () => {
+    if (!questions[currentIndex]) return
+    const currentNum = questions[currentIndex].originalNumber
+    setAttemptLaterNums(prev => {
+      const next = new Set(prev)
+      if (next.has(currentNum)) next.delete(currentNum)
+      else next.add(currentNum)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    if (selectedSection === 'AttemptLater') {
+      if (attemptLaterNums.size === 0) {
+        setSelectedSection('All')
+        setQuestions(allQuestions)
+        setCurrentIndex(0)
+        setShowingAnswer(false)
+      } else {
+        const filtered = allQuestions.filter(q => attemptLaterNums.has(q.originalNumber))
+        setQuestions(filtered)
+        setCurrentIndex(prev => Math.max(0, Math.min(prev, filtered.length - 1)))
+        setShowingAnswer(false)
+      }
+    }
+  }, [attemptLaterNums, selectedSection, allQuestions])
+
   if (loading) {
     return <div className="container" style={{ textAlign: 'center' }}>Loading Quiz...</div>
   }
@@ -306,6 +334,8 @@ export default function FlashcardApp() {
                   setSelectedSection(sec)
                   if (sec === 'All') {
                     setQuestions(allQuestions)
+                  } else if (sec === 'AttemptLater') {
+                    setQuestions(allQuestions.filter(q => attemptLaterNums.has(q.originalNumber)))
                   } else {
                     setQuestions(allQuestions.filter(q => q.section === sec))
                   }
@@ -316,6 +346,9 @@ export default function FlashcardApp() {
               >
                 <option value="All">All Sections</option>
                 {sections.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+                {attemptLaterNums.size > 0 && (
+                  <option value="AttemptLater">Attempt Later ({attemptLaterNums.size})</option>
+                )}
               </select>
             )}
           </div>
@@ -349,8 +382,15 @@ export default function FlashcardApp() {
         </div>
 
         {questions.length > 0 ? (
-          <div className={`flashcard ${animating ? 'animating' : ''}`}>
-            <div className="q-number">{card.prefix} (Q{card.originalNumber})</div>
+          <div className={`flashcard ${animating ? 'animating' : ''}`} onDoubleClick={handleAttemptLaterToggle}>
+            <div className="q-number">
+              {card.prefix} (Q{card.originalNumber})
+              {attemptLaterNums.has(card.originalNumber) && (
+                <span style={{ marginLeft: '10px', fontSize: '0.8em', color: '#eab308', backgroundColor: '#fef08a20', padding: '2px 6px', borderRadius: '4px' }}>
+                  📝 Attempt Later
+                </span>
+              )}
+            </div>
             <div className="card-content">{card.q || "(Empty Question)"}</div>
             {(!qOnlyMode && showingAnswer && card.a) && (
               <div className="answer-content visible">{card.a}</div>
