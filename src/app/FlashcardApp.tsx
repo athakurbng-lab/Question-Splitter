@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { saveResumeState, getBookmarkedQuestionNumbers, toggleBookmarkState } from '@/actions/bookmarks'
 import { getSourceUrl } from '@/actions/sources'
@@ -272,6 +272,25 @@ export default function FlashcardApp() {
     }
   }, [attemptLaterNums, selectedSection, allQuestions])
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (attemptLaterNums.size > 0) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [attemptLaterNums.size])
+
+  const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (attemptLaterNums.size > 0) {
+      if (!window.confirm("You have questions in your 'Attempt Later' list. Are you sure you want to leave?")) {
+        e.preventDefault()
+      }
+    }
+  }
+
   if (loading) {
     return <div className="container" style={{ textAlign: 'center' }}>Loading Quiz...</div>
   }
@@ -282,7 +301,7 @@ export default function FlashcardApp() {
         <div className="panel">
           <h2>No questions found!</h2>
           <p>We couldn&apos;t find any questions. {bookmarksOnly ? "Maybe you haven't bookmarked any?" : "Check the document format."}</p>
-          <Link href="/take-quiz" className="btn-primary">Go Back</Link>
+          <Link href="/take-quiz" className="btn-primary" onClick={handleLinkClick}>Go Back</Link>
         </div>
       </div>
     )
@@ -295,8 +314,8 @@ export default function FlashcardApp() {
     <div className="container">
       <div className="header" style={{ position: 'relative', marginBottom: 0 }}>
         <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: '0.5rem' }}>
-          <Link href={bookmarksOnly ? "/bookmarks" : "/take-quiz"} className="secondary-btn" style={{ textDecoration: 'none' }}>Back</Link>
-          <Link href="/dashboard" className="secondary-btn" style={{ textDecoration: 'none' }}>Dashboard</Link>
+          <Link href={bookmarksOnly ? "/bookmarks" : "/take-quiz"} onClick={handleLinkClick} className="secondary-btn" style={{ textDecoration: 'none' }}>Back</Link>
+          <Link href="/dashboard" onClick={handleLinkClick} className="secondary-btn" style={{ textDecoration: 'none' }}>Dashboard</Link>
         </div>
         <h1 style={{ fontSize: '2rem', textAlign: 'left' }}>{bookmarksOnly ? 'Bookmarked Questions' : 'Quiz Session'}</h1>
       </div>
