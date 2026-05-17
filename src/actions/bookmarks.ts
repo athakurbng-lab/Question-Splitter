@@ -80,7 +80,13 @@ export async function getBookmarks() {
   if (!session) return []
 
   return await prisma.bookmark.findMany({
-    where: { user_id: session.userId },
+    where: { 
+      user_id: session.userId,
+      OR: [
+        { question_number: { gte: 0 } },
+        { question_number: null }
+      ]
+    },
     include: { source_link: true },
     orderBy: { id: 'desc' } // or whatever order
   })
@@ -121,24 +127,35 @@ export async function toggleBookmarkState(sourceLinkId: number, questionNumber: 
   const session = await getSession()
   if (!session) throw new Error('Unauthorized')
 
-  const existing = await prisma.bookmark.findFirst({
-    where: { user_id: session.userId, source_link_id: sourceLinkId, question_number: questionNumber }
-  })
+  const oppositeNumber = -questionNumber;
 
-  if (existing) {
-    await prisma.bookmark.delete({ where: { id: existing.id } })
-    return false
-  } else {
-    await prisma.bookmark.create({
-      data: {
-        user_id: session.userId,
-        source_link_id: sourceLinkId,
-        question_number: questionNumber,
-        question_text: `${prefix} ${qText}\nAns: ${aText}`
-      }
-    })
-    return true
-  }
+  return await prisma.$transaction(async (tx) => {
+    // Clean up opposite state if any
+    await tx.bookmark.deleteMany({
+      where: { user_id: session.userId, source_link_id: sourceLinkId, question_number: oppositeNumber }
+    });
+
+    // Try to delete the current state
+    const deleted = await tx.bookmark.deleteMany({
+      where: { user_id: session.userId, source_link_id: sourceLinkId, question_number: questionNumber }
+    });
+
+    // If we deleted something, it means it was toggled OFF
+    if (deleted.count > 0) {
+      return false;
+    } else {
+      // Otherwise, it wasn't there, so we toggle it ON
+      await tx.bookmark.create({
+        data: {
+          user_id: session.userId,
+          source_link_id: sourceLinkId,
+          question_number: questionNumber,
+          question_text: `${prefix} ${qText}\nAns: ${aText}`
+        }
+      });
+      return true;
+    }
+  });
 }
 
 export async function getBookmarkedQuestionNumbers(sourceLinkId: number) {

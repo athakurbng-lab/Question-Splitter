@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { saveResumeState, getBookmarkedQuestionNumbers, toggleBookmarkState } from '@/actions/bookmarks'
 import { getSourceUrl } from '@/actions/sources'
@@ -35,7 +35,15 @@ export default function FlashcardApp() {
   const [sourceLinkId, setSourceLinkId] = useState<number | null>(null)
   const [animating, setAnimating] = useState(false)
   const [bookmarkedNums, setBookmarkedNums] = useState<Set<number>>(new Set())
+  const [flaggedNums, setFlaggedNums] = useState<Set<number>>(new Set())
   const [attemptLaterNums, setAttemptLaterNums] = useState<Set<number>>(new Set())
+  const clickTimeout = useRef<NodeJS.Timeout | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (clickTimeout.current) clearTimeout(clickTimeout.current)
+    }
+  }, [])
 
   async function fetchGDocText(url: string) {
     const docIdMatch = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9-_]+)/)
@@ -47,7 +55,7 @@ export default function FlashcardApp() {
     return await response.text()
   }
 
-  function parseTextContent(rawText: string, currentBookmarks: Set<number>) {
+  function parseTextContent(rawText: string, currentBookmarks: Set<number>, currentFlags: Set<number>) {
     const lines = rawText.split('\n')
     const processedText = lines.map(line => {
       const trimmed = line.trim()
@@ -116,12 +124,17 @@ export default function FlashcardApp() {
 
     if (newAllQs.length > 0) {
       setAllQuestions(newAllQs)
-      setQuestions(newAllQs)
+
+      let initialFiltered = newAllQs;
+      if (!bookmarksOnly) {
+        initialFiltered = newAllQs.filter(q => !currentFlags.has(q.originalNumber))
+      }
+      setQuestions(initialFiltered)
       
       let initialIdx = 0
       if (qParam && !bookmarksOnly) {
         const targetQ = parseInt(qParam)
-        const idx = newAllQs.findIndex(q => q.originalNumber === targetQ)
+        const idx = initialFiltered.findIndex(q => q.originalNumber === targetQ)
         if (idx !== -1) initialIdx = idx
       }
       
@@ -156,12 +169,15 @@ export default function FlashcardApp() {
 
         if (rawText) {
           let bms = new Set<number>()
+          let flags = new Set<number>()
           if (sid) {
             const nums = await getBookmarkedQuestionNumbers(sid)
-            bms = new Set(nums)
+            bms = new Set(nums.filter(n => n > 0))
+            flags = new Set(nums.filter(n => n < 0).map(n => Math.abs(n)))
             setBookmarkedNums(bms)
+            setFlaggedNums(flags)
           }
-          parseTextContent(rawText, bms)
+          parseTextContent(rawText, bms, flags)
         } else {
           setLoading(false)
         }
@@ -240,8 +256,51 @@ export default function FlashcardApp() {
         else next.delete(card.originalNumber)
         return next
       })
+      if (isNowBookmarked) {
+        setFlaggedNums(prev => {
+          const next = new Set(prev)
+          next.delete(card.originalNumber)
+          return next
+        })
+      }
     } catch {
       alert('Failed to bookmark. Are you logged in?')
+    }
+  }
+
+  const handleFlagToggle = async () => {
+    const card = questions[currentIndex]
+    if (!sourceLinkId) return
+    try {
+      const isNowFlagged = await toggleBookmarkState(sourceLinkId, -card.originalNumber, card.prefix, card.q, card.a || '')
+      setFlaggedNums(prev => {
+        const next = new Set(prev)
+        if (isNowFlagged) next.add(card.originalNumber)
+        else next.delete(card.originalNumber)
+        return next
+      })
+      if (isNowFlagged) {
+        setBookmarkedNums(prev => {
+          const next = new Set(prev)
+          next.delete(card.originalNumber)
+          return next
+        })
+      }
+    } catch {
+      alert('Failed to flag. Are you logged in?')
+    }
+  }
+
+  const handleBookmarkAction = () => {
+    if (clickTimeout.current) {
+      clearTimeout(clickTimeout.current)
+      clickTimeout.current = null
+      handleFlagToggle() // Double click
+    } else {
+      clickTimeout.current = setTimeout(() => {
+        handleBookmarkToggle() // Single click
+        clickTimeout.current = null
+      }, 250)
     }
   }
 
@@ -257,20 +316,35 @@ export default function FlashcardApp() {
   }
 
   useEffect(() => {
+    if (allQuestions.length === 0) return;
+
+    let filtered = allQuestions;
+
     if (selectedSection === 'AttemptLater') {
       if (attemptLaterNums.size === 0) {
-        setSelectedSection('All')
-        setQuestions(allQuestions)
-        setCurrentIndex(0)
-        setShowingAnswer(false)
-      } else {
-        const filtered = allQuestions.filter(q => attemptLaterNums.has(q.originalNumber))
-        setQuestions(filtered)
-        setCurrentIndex(prev => Math.max(0, Math.min(prev, filtered.length - 1)))
-        setShowingAnswer(false)
+        setSelectedSection('All');
+        return; 
       }
+      filtered = filtered.filter(q => attemptLaterNums.has(q.originalNumber));
+    } else if (selectedSection === 'FlaggedQuestions') {
+      if (flaggedNums.size === 0 && !bookmarksOnly) {
+        setSelectedSection('All');
+        return;
+      }
+      filtered = filtered.filter(q => flaggedNums.has(q.originalNumber));
+    } else {
+      if (selectedSection !== 'All') {
+        filtered = filtered.filter(q => q.section === selectedSection);
+      }
+      filtered = filtered.filter(q => !flaggedNums.has(q.originalNumber));
     }
-  }, [attemptLaterNums, selectedSection, allQuestions])
+
+    setQuestions(filtered);
+    setCurrentIndex(prev => {
+      if (filtered.length === 0) return 0;
+      return Math.max(0, Math.min(prev, filtered.length - 1));
+    });
+  }, [selectedSection, attemptLaterNums, flaggedNums, allQuestions, bookmarksOnly]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -349,15 +423,7 @@ export default function FlashcardApp() {
                 className="jump-input" 
                 value={selectedSection}
                 onChange={e => {
-                  const sec = e.target.value
-                  setSelectedSection(sec)
-                  if (sec === 'All') {
-                    setQuestions(allQuestions)
-                  } else if (sec === 'AttemptLater') {
-                    setQuestions(allQuestions.filter(q => attemptLaterNums.has(q.originalNumber)))
-                  } else {
-                    setQuestions(allQuestions.filter(q => q.section === sec))
-                  }
+                  setSelectedSection(e.target.value)
                   setCurrentIndex(0)
                   setShowingAnswer(false)
                   triggerAnimation()
@@ -368,14 +434,17 @@ export default function FlashcardApp() {
                 {attemptLaterNums.size > 0 && (
                   <option value="AttemptLater">Attempt Later ({attemptLaterNums.size})</option>
                 )}
+                {flaggedNums.size > 0 && !bookmarksOnly && (
+                  <option value="FlaggedQuestions">🚩 Flagged ({flaggedNums.size})</option>
+                )}
               </select>
             )}
           </div>
           <div className="settings">
             <button 
               className="secondary-btn" 
-              onClick={handleBookmarkToggle} 
-              title={isBookmarked ? "Remove bookmark" : "Bookmark this question"}
+              onClick={handleBookmarkAction} 
+              title={isBookmarked ? "Remove bookmark" : "Bookmark this question (Double click to Flag)"}
               style={{ color: isBookmarked ? '#f59e0b' : 'inherit', borderColor: isBookmarked ? '#f59e0b' : 'inherit' }}
             >
               {isBookmarked ? '★ Bookmarked' : '☆ Bookmark'}
@@ -407,6 +476,11 @@ export default function FlashcardApp() {
               {attemptLaterNums.has(card.originalNumber) && (
                 <span style={{ marginLeft: '10px', fontSize: '0.8em', color: '#eab308', backgroundColor: '#fef08a20', padding: '2px 6px', borderRadius: '4px' }}>
                   📝 Attempt Later
+                </span>
+              )}
+              {flaggedNums.has(card.originalNumber) && (
+                <span style={{ marginLeft: '10px', fontSize: '0.8em', color: '#ef4444', backgroundColor: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>
+                  🚩 Flagged
                 </span>
               )}
             </div>
