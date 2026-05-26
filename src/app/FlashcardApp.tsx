@@ -37,6 +37,7 @@ export default function FlashcardApp() {
   const [bookmarkedNums, setBookmarkedNums] = useState<Set<number>>(new Set())
   const [flaggedNums, setFlaggedNums] = useState<Set<number>>(new Set())
   const [attemptLaterNums, setAttemptLaterNums] = useState<Set<number>>(new Set())
+  const [timeSpent, setTimeSpent] = useState(0)
   const clickTimeout = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -347,6 +348,24 @@ export default function FlashcardApp() {
   }, [selectedSection, attemptLaterNums, flaggedNums, allQuestions, bookmarksOnly]);
 
   useEffect(() => {
+    setTimeSpent(0)
+  }, [questions[currentIndex]?.originalNumber])
+
+  useEffect(() => {
+    if (questions.length === 0 || showingAnswer) return
+    const interval = setInterval(() => {
+      setTimeSpent(prev => prev + 1)
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [questions.length, currentIndex, showingAnswer])
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
+
+  useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (attemptLaterNums.size > 0) {
         e.preventDefault()
@@ -441,6 +460,9 @@ export default function FlashcardApp() {
             )}
           </div>
           <div className="settings">
+            <div className="timer" style={{ display: 'flex', alignItems: 'center', fontWeight: 'bold', fontFamily: 'monospace', fontSize: '1.2rem', padding: '0 10px', color: '#6366f1' }} title="Time spent on this question">
+              ⏱ {formatTime(timeSpent)}
+            </div>
             <button 
               className="secondary-btn" 
               onClick={handleBookmarkAction} 
