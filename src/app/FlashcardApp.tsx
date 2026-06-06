@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { saveResumeState, getBookmarkedQuestionNumbers, toggleBookmarkState } from '@/actions/bookmarks'
-import { getSourceUrl } from '@/actions/sources'
+import { getSourceUrl, fetchGDocTextServer } from '@/actions/sources'
 import Link from 'next/link'
 
 type Question = {
@@ -23,6 +23,7 @@ export default function FlashcardApp() {
   const bookmarksOnly = searchParams.get('bookmarksOnly') === 'true'
 
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [allQuestions, setAllQuestions] = useState<Question[]>([])
   const [questions, setQuestions] = useState<Question[]>([])
   const [sections, setSections] = useState<string[]>([])
@@ -47,13 +48,7 @@ export default function FlashcardApp() {
   }, [])
 
   async function fetchGDocText(url: string) {
-    const docIdMatch = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9-_]+)/)
-    if (!docIdMatch) return ''
-    const exportUrl = `https://docs.google.com/document/export?format=txt&id=${docIdMatch[1]}`
-    const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(exportUrl)}`
-    const response = await fetch(proxyUrl)
-    if (!response.ok) throw new Error('Failed to fetch document')
-    return await response.text()
+    return await fetchGDocTextServer(url)
   }
 
   function parseTextContent(rawText: string, currentBookmarks: Set<number>, currentFlags: Set<number>) {
@@ -149,6 +144,7 @@ export default function FlashcardApp() {
   useEffect(() => {
     const init = async () => {
       setLoading(true)
+      setError(null)
       try {
         let rawText = ''
         let sid = null
@@ -184,6 +180,7 @@ export default function FlashcardApp() {
         }
       } catch (e) {
         console.error(e)
+        setError(e instanceof Error ? e.message : String(e))
         setLoading(false)
       }
     }
@@ -386,6 +383,18 @@ export default function FlashcardApp() {
 
   if (loading) {
     return <div className="container" style={{ textAlign: 'center' }}>Loading Quiz...</div>
+  }
+
+  if (error) {
+    return (
+      <div className="container" style={{ textAlign: 'center' }}>
+        <div className="panel" style={{ borderTop: '4px solid #ef4444' }}>
+          <h2 style={{ color: '#ef4444', marginTop: 0 }}>Error Loading Document</h2>
+          <p style={{ margin: '1.5rem 0', lineHeight: '1.6' }}>{error}</p>
+          <Link href="/take-quiz" className="btn-primary" onClick={handleLinkClick}>Go Back</Link>
+        </div>
+      </div>
+    )
   }
 
   if (allQuestions.length === 0) {
