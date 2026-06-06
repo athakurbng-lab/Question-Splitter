@@ -414,12 +414,12 @@ export default function FlashcardApp() {
 
   return (
     <div className="container">
-      <div className="header" style={{ position: 'relative', marginBottom: 0 }}>
-        <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: '0.5rem' }}>
-          <Link href={bookmarksOnly ? "/bookmarks" : "/take-quiz"} onClick={handleLinkClick} className="secondary-btn" style={{ textDecoration: 'none' }}>Back</Link>
-          <Link href="/dashboard" onClick={handleLinkClick} className="secondary-btn" style={{ textDecoration: 'none' }}>Dashboard</Link>
+      <div className="app-header">
+        <h1>{bookmarksOnly ? 'Bookmarked Questions' : 'Quiz Session'}</h1>
+        <div className="header-actions">
+          <Link href={bookmarksOnly ? "/bookmarks" : "/take-quiz"} onClick={handleLinkClick} className="secondary-btn">Back</Link>
+          <Link href="/dashboard" onClick={handleLinkClick} className="secondary-btn">Dashboard</Link>
         </div>
-        <h1 style={{ fontSize: '2rem', textAlign: 'left' }}>{bookmarksOnly ? 'Bookmarked Questions' : 'Quiz Session'}</h1>
       </div>
 
       <div className="panel flashcard-view" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '-1rem' }}>
