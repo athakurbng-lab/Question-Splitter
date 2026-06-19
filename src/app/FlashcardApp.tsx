@@ -76,6 +76,8 @@ export default function FlashcardApp() {
     if (!userId) return
 
     const pusher = getPusherClient()
+    if (!pusher) return
+
     hasReceivedFullState.current = false // Reset state assumption on remount or source change
 
     const requestFullState = () => {
