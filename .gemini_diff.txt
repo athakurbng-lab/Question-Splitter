@@ -1,0 +1,1222 @@
+diff --git a/diff.txt b/diff.txt
+new file mode 100644
+index 0000000..7307f6f
+--- /dev/null
++++ b/diff.txt
+@@ -0,0 +1,315 @@
++diff --git a/src/app/FlashcardApp.tsx b/src/app/FlashcardApp.tsx
++index 900091a..5d650f9 100644
++--- a/src/app/FlashcardApp.tsx
+++++ b/src/app/FlashcardApp.tsx
++@@ -4,6 +4,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
++ import { useSearchParams } from 'next/navigation'
++ import { saveResumeState, getBookmarkedQuestionNumbers, toggleBookmarkState } from '@/actions/bookmarks'
++ import { getSourceUrl, fetchGDocTextServer } from '@/actions/sources'
+++import { getSession } from '@/actions/auth'
+++import { broadcastQuizEvent } from '@/actions/sync'
+++import { getPusherClient } from '@/lib/pusher-client'
++ import Link from 'next/link'
++ 
++ type Question = {
++@@ -40,13 +43,176 @@ export default function FlashcardApp() {
++   const [attemptLaterNums, setAttemptLaterNums] = useState<Set<number>>(new Set())
++   const [timeSpent, setTimeSpent] = useState(0)
++   const clickTimeout = useRef<NodeJS.Timeout | null>(null)
+++  const [userId, setUserId] = useState<string | null>(null)
+++  const pusherSocketId = useRef<string | null>(null)
+++
+++  const syncStateRef = useRef({
+++    currentIndex,
+++    attemptLaterNums,
+++    selectedSection
+++  })
+++
+++  useEffect(() => {
+++    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection }
+++  }, [currentIndex, attemptLaterNums, selectedSection])
++ 
++   useEffect(() => {
+++    getSession().then(session => {
+++      if (session) setUserId(session.userId)
+++    }).catch(console.error)
+++
++     return () => {
++       if (clickTimeout.current) clearTimeout(clickTimeout.current)
++     }
++   }, [])
++ 
+++  // Pusher setup
+++  useEffect(() => {
+++    if (!userId) return
+++
+++    const pusher = getPusherClient()
+++    pusher.connection.bind('connected', () => {
+++      pusherSocketId.current = pusher.connection.socket_id
+++    })
+++
+++    const channel = pusher.subscribe(`private-user-${userId}`)
+++
+++    // 1. Listen for requests for full state
+++    channel.bind('request-full-state', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        const { currentIndex: refIndex, attemptLaterNums: refAttempt, selectedSection: refSection } = syncStateRef.current
+++        if (refAttempt.size > 0 || refIndex > 0 || refSection !== 'All') {
+++          broadcastQuizEvent({
+++            eventName: 'full-state',
+++            payload: {
+++              sourceLinkId,
+++              currentIndex: refIndex,
+++              attemptLaterNums: Array.from(refAttempt),
+++              selectedSection: refSection
+++            },
+++            socketId: pusherSocketId.current || undefined
+++          }).catch(console.error)
+++        }
+++      }
+++    })
+++
+++    // 2. Listen for full state responses
+++    channel.bind('full-state', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        if (data.selectedSection) setSelectedSection(data.selectedSection)
+++        setCurrentIndex(data.currentIndex)
+++        setAttemptLaterNums(new Set(data.attemptLaterNums))
+++      }
+++    })
+++
+++    // 3. Listen for deltas
+++    channel.bind('delta-navigate', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        setCurrentIndex(data.currentIndex)
+++      }
+++    })
+++
+++    channel.bind('delta-section', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        setSelectedSection(data.selectedSection)
+++        setCurrentIndex(0)
+++      }
+++    })
+++
+++    channel.bind('delta-attempt-later', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        setAttemptLaterNums(prev => {
+++          const next = new Set(prev)
+++          if (data.isAdding) next.add(data.originalNumber)
+++          else next.delete(data.originalNumber)
+++          return next
+++        })
+++      }
+++    })
+++
+++    channel.bind('delta-flag', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        setFlaggedNums(prev => {
+++          const next = new Set(prev)
+++          if (data.isAdding) next.add(data.originalNumber)
+++          else next.delete(data.originalNumber)
+++          return next
+++        })
+++      }
+++    })
+++
+++    channel.bind('delta-bookmark', (data: any) => {
+++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
+++        setBookmarkedNums(prev => {
+++          const next = new Set(prev)
+++          if (data.isAdding) next.add(data.originalNumber)
+++          else next.delete(data.originalNumber)
+++          return next
+++        })
+++      }
+++    })
+++
+++    // Request full state on connect
+++    if (sourceLinkId) {
+++      broadcastQuizEvent({
+++        eventName: 'request-full-state',
+++        payload: { sourceLinkId },
+++        socketId: pusherSocketId.current || undefined
+++      }).catch(console.error)
+++    }
+++
+++    return () => {
+++      pusher.unsubscribe(`private-user-${userId}`)
+++      channel.unbind_all()
+++    }
+++  }, [userId, sourceLinkId])
+++
+++  // Broadcast specific actions
+++  const broadcastNavigate = useCallback((newIndex: number) => {
+++    if (!sourceLinkId || !pusherSocketId.current) return
+++    broadcastQuizEvent({
+++      eventName: 'delta-navigate',
+++      payload: { sourceLinkId, currentIndex: newIndex },
+++      socketId: pusherSocketId.current
+++    }).catch(console.error)
+++  }, [sourceLinkId])
+++
+++  const broadcastSection = useCallback((section: string) => {
+++    if (!sourceLinkId || !pusherSocketId.current) return
+++    broadcastQuizEvent({
+++      eventName: 'delta-section',
+++      payload: { sourceLinkId, selectedSection: section },
+++      socketId: pusherSocketId.current
+++    }).catch(console.error)
+++  }, [sourceLinkId])
+++
+++  const broadcastAttemptLaterDelta = useCallback((originalNumber: number, isAdding: boolean) => {
+++    if (!sourceLinkId || !pusherSocketId.current) return
+++    broadcastQuizEvent({
+++      eventName: 'delta-attempt-later',
+++      payload: { sourceLinkId, originalNumber, isAdding },
+++      socketId: pusherSocketId.current
+++    }).catch(console.error)
+++  }, [sourceLinkId])
+++
+++  const broadcastFlagDelta = useCallback((originalNumber: number, isAdding: boolean) => {
+++    if (!sourceLinkId || !pusherSocketId.current) return
+++    broadcastQuizEvent({
+++      eventName: 'delta-flag',
+++      payload: { sourceLinkId, originalNumber, isAdding },
+++      socketId: pusherSocketId.current
+++    }).catch(console.error)
+++  }, [sourceLinkId])
+++
+++  const broadcastBookmarkDelta = useCallback((originalNumber: number, isAdding: boolean) => {
+++    if (!sourceLinkId || !pusherSocketId.current) return
+++    broadcastQuizEvent({
+++      eventName: 'delta-bookmark',
+++      payload: { sourceLinkId, originalNumber, isAdding },
+++      socketId: pusherSocketId.current
+++    }).catch(console.error)
+++  }, [sourceLinkId])
+++
++   async function fetchGDocText(url: string) {
++     return await fetchGDocTextServer(url)
++   }
++@@ -210,18 +376,27 @@ export default function FlashcardApp() {
++     if (!qOnlyMode && card.a && !showingAnswer) {
++       setShowingAnswer(true)
++     } else {
++-      setCurrentIndex(prev => (prev < questions.length - 1 ? prev + 1 : 0))
+++      const nextIndex = (prev: number) => (prev < questions.length - 1 ? prev + 1 : 0)
+++      setCurrentIndex(prev => {
+++        const next = nextIndex(prev)
+++        broadcastNavigate(next)
+++        return next
+++      })
++       setShowingAnswer(false)
++       triggerAnimation()
++     }
++-  }, [questions, currentIndex, qOnlyMode, showingAnswer])
+++  }, [questions, currentIndex, qOnlyMode, showingAnswer, broadcastNavigate])
++ 
++   const handlePrev = useCallback(() => {
++     if (questions.length === 0) return
++-    setCurrentIndex(prev => (prev > 0 ? prev - 1 : questions.length - 1))
+++    setCurrentIndex(prev => {
+++      const next = (prev > 0 ? prev - 1 : questions.length - 1)
+++      broadcastNavigate(next)
+++      return next
+++    })
++     setShowingAnswer(false)
++     triggerAnimation()
++-  }, [questions])
+++  }, [questions, broadcastNavigate])
++ 
++   useEffect(() => {
++     const handleKeyDown = (e: KeyboardEvent) => {
++@@ -248,19 +423,23 @@ export default function FlashcardApp() {
++     }
++     try {
++       const isNowBookmarked = await toggleBookmarkState(sourceLinkId, card.originalNumber, card.prefix, card.q, card.a || '')
+++      broadcastBookmarkDelta(card.originalNumber, isNowBookmarked)
+++      
++       setBookmarkedNums(prev => {
++         const next = new Set(prev)
++         if (isNowBookmarked) next.add(card.originalNumber)
++         else next.delete(card.originalNumber)
++         return next
++       })
++-      if (isNowBookmarked) {
++-        setFlaggedNums(prev => {
++-          const next = new Set(prev)
+++      setFlaggedNums(prev => {
+++        const next = new Set(prev)
+++        // If it was flagged and is now unflagged because we bookmarked it, broadcast unflag
+++        if (prev.has(card.originalNumber) && isNowBookmarked) {
++           next.delete(card.originalNumber)
++-          return next
++-        })
++-      }
+++          broadcastFlagDelta(card.originalNumber, false)
+++        }
+++        return next
+++      })
++     } catch {
++       alert('Failed to bookmark. Are you logged in?')
++     }
++@@ -271,19 +450,22 @@ export default function FlashcardApp() {
++     if (!sourceLinkId) return
++     try {
++       const isNowFlagged = await toggleBookmarkState(sourceLinkId, -card.originalNumber, card.prefix, card.q, card.a || '')
+++      broadcastFlagDelta(card.originalNumber, isNowFlagged)
+++      
++       setFlaggedNums(prev => {
++         const next = new Set(prev)
++         if (isNowFlagged) next.add(card.originalNumber)
++         else next.delete(card.originalNumber)
++         return next
++       })
++-      if (isNowFlagged) {
++-        setBookmarkedNums(prev => {
++-          const next = new Set(prev)
+++      setBookmarkedNums(prev => {
+++        const next = new Set(prev)
+++        if (prev.has(card.originalNumber) && isNowFlagged) {
++           next.delete(card.originalNumber)
++-          return next
++-        })
++-      }
+++          broadcastBookmarkDelta(card.originalNumber, false)
+++        }
+++        return next
+++      })
++     } catch {
++       alert('Failed to flag. Are you logged in?')
++     }
++@@ -307,8 +489,10 @@ export default function FlashcardApp() {
++     const currentNum = questions[currentIndex].originalNumber
++     setAttemptLaterNums(prev => {
++       const next = new Set(prev)
++-      if (next.has(currentNum)) next.delete(currentNum)
++-      else next.add(currentNum)
+++      const isAdding = !next.has(currentNum)
+++      if (isAdding) next.add(currentNum)
+++      else next.delete(currentNum)
+++      broadcastAttemptLaterDelta(currentNum, isAdding)
++       return next
++     })
++   }
++@@ -434,6 +618,7 @@ export default function FlashcardApp() {
++                   const val = parseInt(e.target.value)
++                   if (!isNaN(val) && val >= 0 && val < questions.length) {
++                     setCurrentIndex(val)
+++                    broadcastNavigate(val)
++                     setShowingAnswer(false)
++                     triggerAnimation()
++                   }
++@@ -451,8 +636,10 @@ export default function FlashcardApp() {
++                 className="jump-input" 
++                 value={selectedSection}
++                 onChange={e => {
++-                  setSelectedSection(e.target.value)
+++                  const val = e.target.value
+++                  setSelectedSection(val)
++                   setCurrentIndex(0)
+++                  broadcastSection(val)
++                   setShowingAnswer(false)
++                   triggerAnimation()
++                 }}
+diff --git a/package-lock.json b/package-lock.json
+index 5386096..8e86adf 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -13,6 +13,8 @@
+         "js-cookie": "^3.0.5",
+         "jsonwebtoken": "^9.0.3",
+         "next": "16.2.6",
++        "pusher": "^5.3.4",
++        "pusher-js": "^8.5.0",
+         "react": "19.2.4",
+         "react-dom": "19.2.4"
+       },
+@@ -1413,12 +1415,21 @@
+       "version": "20.19.40",
+       "resolved": "https://registry.npmjs.org/@types/node/-/node-20.19.40.tgz",
+       "integrity": "sha512-xxx6M2IpSTnnKcR0cMvIiohkiCx20/oRPtWGbenFygKCGl3zqUzdNjQ/1V4solq1LU+dgv0nQzeGOuqkqZGg0Q==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "undici-types": "~6.21.0"
+       }
+     },
++    "node_modules/@types/node-fetch": {
++      "version": "2.6.13",
++      "resolved": "https://registry.npmjs.org/@types/node-fetch/-/node-fetch-2.6.13.tgz",
++      "integrity": "sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==",
++      "license": "MIT",
++      "dependencies": {
++        "@types/node": "*",
++        "form-data": "^4.0.4"
++      }
++    },
+     "node_modules/@types/react": {
+       "version": "19.2.14",
+       "resolved": "https://registry.npmjs.org/@types/react/-/react-19.2.14.tgz",
+@@ -2005,6 +2016,18 @@
+         "win32"
+       ]
+     },
++    "node_modules/abort-controller": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/abort-controller/-/abort-controller-3.0.0.tgz",
++      "integrity": "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==",
++      "license": "MIT",
++      "dependencies": {
++        "event-target-shim": "^5.0.0"
++      },
++      "engines": {
++        "node": ">=6.5"
++      }
++    },
+     "node_modules/acorn": {
+       "version": "8.16.0",
+       "resolved": "https://registry.npmjs.org/acorn/-/acorn-8.16.0.tgz",
+@@ -2256,6 +2279,12 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/asynckit": {
++      "version": "0.4.0",
++      "resolved": "https://registry.npmjs.org/asynckit/-/asynckit-0.4.0.tgz",
++      "integrity": "sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==",
++      "license": "MIT"
++    },
+     "node_modules/available-typed-arrays": {
+       "version": "1.0.7",
+       "resolved": "https://registry.npmjs.org/available-typed-arrays/-/available-typed-arrays-1.0.7.tgz",
+@@ -2442,7 +2471,6 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
+       "integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "es-errors": "^1.3.0",
+@@ -2568,6 +2596,18 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/combined-stream": {
++      "version": "1.0.8",
++      "resolved": "https://registry.npmjs.org/combined-stream/-/combined-stream-1.0.8.tgz",
++      "integrity": "sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==",
++      "license": "MIT",
++      "dependencies": {
++        "delayed-stream": "~1.0.0"
++      },
++      "engines": {
++        "node": ">= 0.8"
++      }
++    },
+     "node_modules/concat-map": {
+       "version": "0.0.1",
+       "resolved": "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz",
+@@ -2760,6 +2800,15 @@
+       "devOptional": true,
+       "license": "MIT"
+     },
++    "node_modules/delayed-stream": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/delayed-stream/-/delayed-stream-1.0.0.tgz",
++      "integrity": "sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.4.0"
++      }
++    },
+     "node_modules/destr": {
+       "version": "2.0.5",
+       "resolved": "https://registry.npmjs.org/destr/-/destr-2.0.5.tgz",
+@@ -2807,7 +2856,6 @@
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
+       "integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "call-bind-apply-helpers": "^1.0.1",
+@@ -2935,7 +2983,6 @@
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
+       "integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">= 0.4"
+@@ -2945,7 +2992,6 @@
+       "version": "1.3.0",
+       "resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
+       "integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">= 0.4"
+@@ -2983,7 +3029,6 @@
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.1.tgz",
+       "integrity": "sha512-FGgH2h8zKNim9ljj7dankFPcICIK9Cp5bm+c2gQSYePhpaG5+esrLODihIorn+Pe6FGJzWhXQotPv73jTaldXA==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "es-errors": "^1.3.0"
+@@ -2996,7 +3041,6 @@
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/es-set-tostringtag/-/es-set-tostringtag-2.1.0.tgz",
+       "integrity": "sha512-j6vWzfrGVfyXxge+O0x5sh6cvxAog0a/4Rdd2K36zCMV5eJ+/+tOAngRO8cODMNWbVRdVlmGZQL2YS3yR8bIUA==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "es-errors": "^1.3.0",
+@@ -3470,6 +3514,15 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/event-target-shim": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/event-target-shim/-/event-target-shim-5.0.1.tgz",
++      "integrity": "sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
+     "node_modules/exsolve": {
+       "version": "1.0.8",
+       "resolved": "https://registry.npmjs.org/exsolve/-/exsolve-1.0.8.tgz",
+@@ -3641,11 +3694,26 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/form-data": {
++      "version": "4.0.6",
++      "resolved": "https://registry.npmjs.org/form-data/-/form-data-4.0.6.tgz",
++      "integrity": "sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==",
++      "license": "MIT",
++      "dependencies": {
++        "asynckit": "^0.4.0",
++        "combined-stream": "^1.0.8",
++        "es-set-tostringtag": "^2.1.0",
++        "hasown": "^2.0.4",
++        "mime-types": "^2.1.35"
++      },
++      "engines": {
++        "node": ">= 6"
++      }
++    },
+     "node_modules/function-bind": {
+       "version": "1.1.2",
+       "resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
+       "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==",
+-      "dev": true,
+       "license": "MIT",
+       "funding": {
+         "url": "https://github.com/sponsors/ljharb"
+@@ -3706,7 +3774,6 @@
+       "version": "1.3.0",
+       "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
+       "integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "call-bind-apply-helpers": "^1.0.2",
+@@ -3731,7 +3798,6 @@
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
+       "integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "dunder-proto": "^1.0.1",
+@@ -3837,7 +3903,6 @@
+       "version": "1.2.0",
+       "resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
+       "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">= 0.4"
+@@ -3902,7 +3967,6 @@
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
+       "integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">= 0.4"
+@@ -3915,7 +3979,6 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/has-tostringtag/-/has-tostringtag-1.0.2.tgz",
+       "integrity": "sha512-NqADB8VjPFLM2V0VvHUewwwsw0ZWBaIdgo+ieHtK3hasLz4qeCRjYcqfB6AQrBggRKppKF8L52/VqdVsO47Dlw==",
+-      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "has-symbols": "^1.0.3"
+@@ -3928,10 +3991,9 @@
+       }
+     },
+     "node_modules/hasown": {
+-      "version": "2.0.3",
+-      "resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.3.tgz",
+-      "integrity": "sha512-ej4AhfhfL2Q2zpMmLo7U1Uv9+PyhIZpgQLGT1F9miIGmiCJIoCgSmczFdrc97mWT4kVY72KA+WnnhJ5pghSvSg==",
+-      "dev": true,
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.4.tgz",
++      "integrity": "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==",
+       "license": "MIT",
+       "dependencies": {
+         "function-bind": "^1.1.2"
+@@ -4047,6 +4109,16 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/is-base64": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/is-base64/-/is-base64-1.1.0.tgz",
++      "integrity": "sha512-Nlhg7Z2dVC4/PTvIFkgVVNvPHSO2eR/Yd0XzhGiXCXEvWnptXlXa/clQ8aePPiMuxEGcWfzWbGw2Fe3d+Y3v1g==",
++      "license": "MIT",
++      "bin": {
++        "is_base64": "bin/is-base64",
++        "is-base64": "bin/is-base64"
++      }
++    },
+     "node_modules/is-bigint": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/is-bigint/-/is-bigint-1.1.0.tgz",
+@@ -4750,7 +4822,6 @@
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
+       "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">= 0.4"
+@@ -4780,6 +4851,27 @@
+         "node": ">=8.6"
+       }
+     },
++    "node_modules/mime-db": {
++      "version": "1.52.0",
++      "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
++      "integrity": "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/mime-types": {
++      "version": "2.1.35",
++      "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
++      "integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
++      "license": "MIT",
++      "dependencies": {
++        "mime-db": "1.52.0"
++      },
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
+     "node_modules/minimatch": {
+       "version": "3.1.5",
+       "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz",
+@@ -4931,6 +5023,26 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/node-fetch": {
++      "version": "2.7.0",
++      "resolved": "https://registry.npmjs.org/node-fetch/-/node-fetch-2.7.0.tgz",
++      "integrity": "sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==",
++      "license": "MIT",
++      "dependencies": {
++        "whatwg-url": "^5.0.0"
++      },
++      "engines": {
++        "node": "4.x || >=6.0.0"
++      },
++      "peerDependencies": {
++        "encoding": "^0.1.0"
++      },
++      "peerDependenciesMeta": {
++        "encoding": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/node-fetch-native": {
+       "version": "1.6.7",
+       "resolved": "https://registry.npmjs.org/node-fetch-native/-/node-fetch-native-1.6.7.tgz",
+@@ -5378,6 +5490,32 @@
+       ],
+       "license": "MIT"
+     },
++    "node_modules/pusher": {
++      "version": "5.3.4",
++      "resolved": "https://registry.npmjs.org/pusher/-/pusher-5.3.4.tgz",
++      "integrity": "sha512-gA7NpPRsQW9qpry/Ov+o9KKIPaRMziiDoEtiZ6EF0+QiSdsnT49+dH7+hf0Dvd4d+HEGQDHp6VXtrVM5DDrpmw==",
++      "license": "MIT",
++      "dependencies": {
++        "@types/node-fetch": "^2.5.7",
++        "abort-controller": "^3.0.0",
++        "is-base64": "^1.1.0",
++        "node-fetch": "^2.7.0",
++        "tweetnacl": "^1.0.0",
++        "tweetnacl-util": "^0.15.0"
++      },
++      "engines": {
++        "node": ">= 10.0.0"
++      }
++    },
++    "node_modules/pusher-js": {
++      "version": "8.5.0",
++      "resolved": "https://registry.npmjs.org/pusher-js/-/pusher-js-8.5.0.tgz",
++      "integrity": "sha512-V7uzGi9bqOOOyM/6IkJdpFyjGZj7llz1v0oWnYkZKcYLvbz6VcHVLmzKqkvegjuMumpfIEKGLmWHwFb39XFCpw==",
++      "license": "MIT",
++      "dependencies": {
++        "tweetnacl": "^1.0.3"
++      }
++    },
+     "node_modules/queue-microtask": {
+       "version": "1.2.3",
+       "resolved": "https://registry.npmjs.org/queue-microtask/-/queue-microtask-1.2.3.tgz",
+@@ -6161,6 +6299,12 @@
+         "node": ">=8.0"
+       }
+     },
++    "node_modules/tr46": {
++      "version": "0.0.3",
++      "resolved": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",
++      "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==",
++      "license": "MIT"
++    },
+     "node_modules/ts-api-utils": {
+       "version": "2.5.0",
+       "resolved": "https://registry.npmjs.org/ts-api-utils/-/ts-api-utils-2.5.0.tgz",
+@@ -6206,6 +6350,18 @@
+       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+       "license": "0BSD"
+     },
++    "node_modules/tweetnacl": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/tweetnacl/-/tweetnacl-1.0.3.tgz",
++      "integrity": "sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==",
++      "license": "Unlicense"
++    },
++    "node_modules/tweetnacl-util": {
++      "version": "0.15.1",
++      "resolved": "https://registry.npmjs.org/tweetnacl-util/-/tweetnacl-util-0.15.1.tgz",
++      "integrity": "sha512-RKJBIj8lySrShN4w6i/BonWp2Z/uxwC3h4y7xsRrpP59ZboCd0GpEVsOnMDYLMmKBpYhb5TgHzZXy7wTfYFBRw==",
++      "license": "Unlicense"
++    },
+     "node_modules/type-check": {
+       "version": "0.4.0",
+       "resolved": "https://registry.npmjs.org/type-check/-/type-check-0.4.0.tgz",
+@@ -6359,7 +6515,6 @@
+       "version": "6.21.0",
+       "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
+       "integrity": "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==",
+-      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/unrs-resolver": {
+@@ -6438,6 +6593,22 @@
+         "punycode": "^2.1.0"
+       }
+     },
++    "node_modules/webidl-conversions": {
++      "version": "3.0.1",
++      "resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-3.0.1.tgz",
++      "integrity": "sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==",
++      "license": "BSD-2-Clause"
++    },
++    "node_modules/whatwg-url": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-5.0.0.tgz",
++      "integrity": "sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==",
++      "license": "MIT",
++      "dependencies": {
++        "tr46": "~0.0.3",
++        "webidl-conversions": "^3.0.0"
++      }
++    },
+     "node_modules/which": {
+       "version": "2.0.2",
+       "resolved": "https://registry.npmjs.org/which/-/which-2.0.2.tgz",
+diff --git a/package.json b/package.json
+index de92c4f..0ed53f2 100644
+--- a/package.json
++++ b/package.json
+@@ -14,6 +14,8 @@
+     "js-cookie": "^3.0.5",
+     "jsonwebtoken": "^9.0.3",
+     "next": "16.2.6",
++    "pusher": "^5.3.4",
++    "pusher-js": "^8.5.0",
+     "react": "19.2.4",
+     "react-dom": "19.2.4"
+   },
+diff --git a/src/actions/sync.ts b/src/actions/sync.ts
+new file mode 100644
+index 0000000..501150e
+--- /dev/null
++++ b/src/actions/sync.ts
+@@ -0,0 +1,22 @@
++'use server'
++
++import { getSession } from './auth'
++import { pusherServer } from '@/lib/pusher-server'
++
++export async function broadcastQuizEvent(data: {
++  eventName: string,
++  payload: any,
++  socketId?: string
++}) {
++  const session = await getSession()
++  if (!session) throw new Error('Unauthorized')
++
++  await pusherServer.trigger(
++    `private-user-${session.userId}`,
++    data.eventName,
++    data.payload,
++    { socket_id: data.socketId }
++  )
++
++  return { success: true }
++}
+diff --git a/src/app/FlashcardApp.tsx b/src/app/FlashcardApp.tsx
+index 900091a..b068a6f 100644
+--- a/src/app/FlashcardApp.tsx
++++ b/src/app/FlashcardApp.tsx
+@@ -4,6 +4,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
+ import { useSearchParams } from 'next/navigation'
+ import { saveResumeState, getBookmarkedQuestionNumbers, toggleBookmarkState } from '@/actions/bookmarks'
+ import { getSourceUrl, fetchGDocTextServer } from '@/actions/sources'
++import { getSession } from '@/actions/auth'
++import { broadcastQuizEvent } from '@/actions/sync'
++import { getPusherClient } from '@/lib/pusher-client'
+ import Link from 'next/link'
+ 
+ type Question = {
+@@ -40,13 +43,222 @@ export default function FlashcardApp() {
+   const [attemptLaterNums, setAttemptLaterNums] = useState<Set<number>>(new Set())
+   const [timeSpent, setTimeSpent] = useState(0)
+   const clickTimeout = useRef<NodeJS.Timeout | null>(null)
++  const [userId, setUserId] = useState<string | null>(null)
++  const pusherSocketId = useRef<string | null>(null)
++  const hasReceivedFullState = useRef(false)
++
++  const syncStateRef = useRef({
++    currentIndex,
++    attemptLaterNums,
++    selectedSection,
++    bookmarkedNums,
++    flaggedNums
++  })
+ 
+   useEffect(() => {
++    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums }
++  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums])
++
++  useEffect(() => {
++    getSession().then(session => {
++      if (session) setUserId(session.userId)
++    }).catch(console.error)
++
+     return () => {
+       if (clickTimeout.current) clearTimeout(clickTimeout.current)
+     }
+   }, [])
+ 
++  // Pusher setup
++  useEffect(() => {
++    if (!userId) return
++
++    const pusher = getPusherClient()
++    hasReceivedFullState.current = false // Reset state assumption on remount or source change
++
++    const requestFullState = () => {
++      if (sourceLinkId && pusher.connection.socket_id) {
++        broadcastQuizEvent({
++          eventName: 'request-full-state',
++          payload: { sourceLinkId, requesterSocketId: pusher.connection.socket_id },
++          socketId: pusher.connection.socket_id
++        }).catch(console.error)
++      }
++    }
++
++    const handleConnected = () => {
++      pusherSocketId.current = pusher.connection.socket_id
++      requestFullState()
++    }
++
++    if (pusher.connection.state === 'connected') {
++      pusherSocketId.current = pusher.connection.socket_id
++      requestFullState()
++    } else {
++      pusher.connection.bind('connected', handleConnected)
++    }
++
++    const channel = pusher.subscribe(`private-user-${userId}`)
++
++    // 1. Listen for requests for full state
++    const handleRequestFullState = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        const { currentIndex: refIndex, attemptLaterNums: refAttempt, selectedSection: refSection, bookmarkedNums: refBookmarks, flaggedNums: refFlags } = syncStateRef.current
++        if (refAttempt.size > 0 || refIndex > 0 || refSection !== 'All' || refBookmarks.size > 0 || refFlags.size > 0) {
++          broadcastQuizEvent({
++            eventName: 'full-state',
++            payload: {
++              sourceLinkId,
++              targetSocketId: data.requesterSocketId,
++              currentIndex: refIndex,
++              attemptLaterNums: Array.from(refAttempt),
++              selectedSection: refSection,
++              bookmarkedNums: Array.from(refBookmarks),
++              flaggedNums: Array.from(refFlags)
++            },
++            socketId: pusherSocketId.current || undefined
++          }).catch(console.error)
++        }
++      }
++    }
++    channel.bind('request-full-state', handleRequestFullState)
++
++    // 2. Listen for full state responses
++    const handleFullState = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        // Target filtering
++        if (data.targetSocketId && data.targetSocketId !== pusherSocketId.current) {
++          return
++        }
++        
++        // First Response Strategy
++        if (hasReceivedFullState.current) {
++          return
++        }
++        hasReceivedFullState.current = true
++
++        if (data.selectedSection) setSelectedSection(data.selectedSection)
++        if (data.currentIndex !== undefined) setCurrentIndex(data.currentIndex)
++        if (data.attemptLaterNums) setAttemptLaterNums(new Set(data.attemptLaterNums))
++        if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
++        if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
++      }
++    }
++    channel.bind('full-state', handleFullState)
++
++    // 3. Listen for deltas
++    const handleDeltaNavigate = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        setCurrentIndex(data.currentIndex)
++        setShowingAnswer(false)
++        setAnimating(false)
++        setTimeout(() => setAnimating(true), 10)
++      }
++    }
++    channel.bind('delta-navigate', handleDeltaNavigate)
++
++    const handleDeltaSection = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        setSelectedSection(data.selectedSection)
++        setCurrentIndex(0)
++      }
++    }
++    channel.bind('delta-section', handleDeltaSection)
++
++    const handleDeltaAttemptLater = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        setAttemptLaterNums(prev => {
++          const next = new Set(prev)
++          if (data.isAdding) next.add(data.originalNumber)
++          else next.delete(data.originalNumber)
++          return next
++        })
++      }
++    }
++    channel.bind('delta-attempt-later', handleDeltaAttemptLater)
++
++    const handleDeltaFlag = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        setFlaggedNums(prev => {
++          const next = new Set(prev)
++          if (data.isAdding) next.add(data.originalNumber)
++          else next.delete(data.originalNumber)
++          return next
++        })
++      }
++    }
++    channel.bind('delta-flag', handleDeltaFlag)
++
++    const handleDeltaBookmark = (data: any) => {
++      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
++        setBookmarkedNums(prev => {
++          const next = new Set(prev)
++          if (data.isAdding) next.add(data.originalNumber)
++          else next.delete(data.originalNumber)
++          return next
++        })
++      }
++    }
++    channel.bind('delta-bookmark', handleDeltaBookmark)
++
++    return () => {
++      pusher.connection.unbind('connected', handleConnected)
++      channel.unbind('request-full-state', handleRequestFullState)
++      channel.unbind('full-state', handleFullState)
++      channel.unbind('delta-navigate', handleDeltaNavigate)
++      channel.unbind('delta-section', handleDeltaSection)
++      channel.unbind('delta-attempt-later', handleDeltaAttemptLater)
++      channel.unbind('delta-flag', handleDeltaFlag)
++      channel.unbind('delta-bookmark', handleDeltaBookmark)
++    }
++  }, [userId, sourceLinkId])
++
++  // Broadcast specific actions
++  const broadcastNavigate = useCallback((newIndex: number) => {
++    if (!sourceLinkId || !pusherSocketId.current) return
++    broadcastQuizEvent({
++      eventName: 'delta-navigate',
++      payload: { sourceLinkId, currentIndex: newIndex },
++      socketId: pusherSocketId.current
++    }).catch(console.error)
++  }, [sourceLinkId])
++
++  const broadcastSection = useCallback((section: string) => {
++    if (!sourceLinkId || !pusherSocketId.current) return
++    broadcastQuizEvent({
++      eventName: 'delta-section',
++      payload: { sourceLinkId, selectedSection: section },
++      socketId: pusherSocketId.current
++    }).catch(console.error)
++  }, [sourceLinkId])
++
++  const broadcastAttemptLaterDelta = useCallback((originalNumber: number, isAdding: boolean) => {
++    if (!sourceLinkId || !pusherSocketId.current) return
++    broadcastQuizEvent({
++      eventName: 'delta-attempt-later',
++      payload: { sourceLinkId, originalNumber, isAdding },
++      socketId: pusherSocketId.current
++    }).catch(console.error)
++  }, [sourceLinkId])
++
++  const broadcastFlagDelta = useCallback((originalNumber: number, isAdding: boolean) => {
++    if (!sourceLinkId || !pusherSocketId.current) return
++    broadcastQuizEvent({
++      eventName: 'delta-flag',
++      payload: { sourceLinkId, originalNumber, isAdding },
++      socketId: pusherSocketId.current
++    }).catch(console.error)
++  }, [sourceLinkId])
++
++  const broadcastBookmarkDelta = useCallback((originalNumber: number, isAdding: boolean) => {
++    if (!sourceLinkId || !pusherSocketId.current) return
++    broadcastQuizEvent({
++      eventName: 'delta-bookmark',
++      payload: { sourceLinkId, originalNumber, isAdding },
++      socketId: pusherSocketId.current
++    }).catch(console.error)
++  }, [sourceLinkId])
++
+   async function fetchGDocText(url: string) {
+     return await fetchGDocTextServer(url)
+   }
+@@ -210,18 +422,22 @@ export default function FlashcardApp() {
+     if (!qOnlyMode && card.a && !showingAnswer) {
+       setShowingAnswer(true)
+     } else {
+-      setCurrentIndex(prev => (prev < questions.length - 1 ? prev + 1 : 0))
++      const next = currentIndex < questions.length - 1 ? currentIndex + 1 : 0
++      broadcastNavigate(next)
++      setCurrentIndex(next)
+       setShowingAnswer(false)
+       triggerAnimation()
+     }
+-  }, [questions, currentIndex, qOnlyMode, showingAnswer])
++  }, [questions, currentIndex, qOnlyMode, showingAnswer, broadcastNavigate])
+ 
+   const handlePrev = useCallback(() => {
+     if (questions.length === 0) return
+-    setCurrentIndex(prev => (prev > 0 ? prev - 1 : questions.length - 1))
++    const next = currentIndex > 0 ? currentIndex - 1 : questions.length - 1
++    broadcastNavigate(next)
++    setCurrentIndex(next)
+     setShowingAnswer(false)
+     triggerAnimation()
+-  }, [questions])
++  }, [questions, currentIndex, broadcastNavigate])
+ 
+   useEffect(() => {
+     const handleKeyDown = (e: KeyboardEvent) => {
+@@ -248,19 +464,26 @@ export default function FlashcardApp() {
+     }
+     try {
+       const isNowBookmarked = await toggleBookmarkState(sourceLinkId, card.originalNumber, card.prefix, card.q, card.a || '')
++      broadcastBookmarkDelta(card.originalNumber, isNowBookmarked)
++      
++      const wasFlagged = flaggedNums.has(card.originalNumber)
++      if (wasFlagged && isNowBookmarked) {
++        broadcastFlagDelta(card.originalNumber, false)
++      }
++
+       setBookmarkedNums(prev => {
+         const next = new Set(prev)
+         if (isNowBookmarked) next.add(card.originalNumber)
+         else next.delete(card.originalNumber)
+         return next
+       })
+-      if (isNowBookmarked) {
+-        setFlaggedNums(prev => {
+-          const next = new Set(prev)
++      setFlaggedNums(prev => {
++        const next = new Set(prev)
++        if (wasFlagged && isNowBookmarked) {
+           next.delete(card.originalNumber)
+-          return next
+-        })
+-      }
++        }
++        return next
++      })
+     } catch {
+       alert('Failed to bookmark. Are you logged in?')
+     }
+@@ -271,19 +494,26 @@ export default function FlashcardApp() {
+     if (!sourceLinkId) return
+     try {
+       const isNowFlagged = await toggleBookmarkState(sourceLinkId, -card.originalNumber, card.prefix, card.q, card.a || '')
++      broadcastFlagDelta(card.originalNumber, isNowFlagged)
++      
++      const wasBookmarked = bookmarkedNums.has(card.originalNumber)
++      if (wasBookmarked && isNowFlagged) {
++        broadcastBookmarkDelta(card.originalNumber, false)
++      }
++
+       setFlaggedNums(prev => {
+         const next = new Set(prev)
+         if (isNowFlagged) next.add(card.originalNumber)
+         else next.delete(card.originalNumber)
+         return next
+       })
+-      if (isNowFlagged) {
+-        setBookmarkedNums(prev => {
+-          const next = new Set(prev)
++      setBookmarkedNums(prev => {
++        const next = new Set(prev)
++        if (wasBookmarked && isNowFlagged) {
+           next.delete(card.originalNumber)
+-          return next
+-        })
+-      }
++        }
++        return next
++      })
+     } catch {
+       alert('Failed to flag. Are you logged in?')
+     }
+@@ -305,10 +535,14 @@ export default function FlashcardApp() {
+   const handleAttemptLaterToggle = () => {
+     if (!questions[currentIndex]) return
+     const currentNum = questions[currentIndex].originalNumber
++    
++    const isAdding = !attemptLaterNums.has(currentNum)
++    broadcastAttemptLaterDelta(currentNum, isAdding)
++
+     setAttemptLaterNums(prev => {
+       const next = new Set(prev)
+-      if (next.has(currentNum)) next.delete(currentNum)
+-      else next.add(currentNum)
++      if (isAdding) next.add(currentNum)
++      else next.delete(currentNum)
+       return next
+     })
+   }
+@@ -434,6 +668,7 @@ export default function FlashcardApp() {
+                   const val = parseInt(e.target.value)
+                   if (!isNaN(val) && val >= 0 && val < questions.length) {
+                     setCurrentIndex(val)
++                    broadcastNavigate(val)
+                     setShowingAnswer(false)
+                     triggerAnimation()
+                   }
+@@ -451,8 +686,10 @@ export default function FlashcardApp() {
+                 className="jump-input" 
+                 value={selectedSection}
+                 onChange={e => {
+-                  setSelectedSection(e.target.value)
++                  const val = e.target.value
++                  setSelectedSection(val)
+                   setCurrentIndex(0)
++                  broadcastSection(val)
+                   setShowingAnswer(false)
+                   triggerAnimation()
+                 }}
+diff --git a/src/app/api/pusher/auth/route.ts b/src/app/api/pusher/auth/route.ts
+new file mode 100644
+index 0000000..d65838e
+--- /dev/null
++++ b/src/app/api/pusher/auth/route.ts
+@@ -0,0 +1,28 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { pusherServer } from '@/lib/pusher-server';
++import { getSession } from '@/actions/auth';
++
++export async function POST(req: NextRequest) {
++  const session = await getSession();
++  
++  if (!session) {
++    return new NextResponse('Unauthorized', { status: 401 });
++  }
++
++  const body = await req.text();
++  const params = new URLSearchParams(body);
++  const socketId = params.get('socket_id');
++  const channelName = params.get('channel_name');
++
++  if (!socketId || !channelName) {
++    return new NextResponse('Missing parameters', { status: 400 });
++  }
++
++  // Ensure user can only subscribe to their own private channel
++  if (channelName !== `private-user-${session.userId}`) {
++    return new NextResponse('Forbidden', { status: 403 });
++  }
++
++  const authResponse = pusherServer.authorizeChannel(socketId, channelName);
++  return NextResponse.json(authResponse);
++}
+diff --git a/src/lib/pusher-client.ts b/src/lib/pusher-client.ts
+new file mode 100644
+index 0000000..06e0c8a
+--- /dev/null
++++ b/src/lib/pusher-client.ts
+@@ -0,0 +1,13 @@
++import PusherClient from 'pusher-js';
++
++let pusherClientInstance: PusherClient | null = null;
++
++export const getPusherClient = () => {
++  if (!pusherClientInstance) {
++    pusherClientInstance = new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
++      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
++      authEndpoint: '/api/pusher/auth',
++    });
++  }
++  return pusherClientInstance;
++};
+diff --git a/src/lib/pusher-server.ts b/src/lib/pusher-server.ts
+new file mode 100644
+index 0000000..32e6778
+--- /dev/null
++++ b/src/lib/pusher-server.ts
+@@ -0,0 +1,9 @@
++import PusherServer from 'pusher';
++
++export const pusherServer = new PusherServer({
++  appId: process.env.PUSHER_APP_ID!,
++  key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
++  secret: process.env.PUSHER_SECRET!,
++  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
++  useTLS: true,
++});
