@@ -47,6 +47,8 @@ export default function FlashcardApp() {
   const pusherSocketId = useRef<string | null>(null)
   const hasReceivedFullState = useRef(false)
   const [customOrder, setCustomOrder] = useState<number[] | null>(null)
+  const [showSyncModal, setShowSyncModal] = useState(false)
+  const pendingReceive = useRef(false)
 
   const syncStateRef = useRef({
     currentIndex,
@@ -54,12 +56,13 @@ export default function FlashcardApp() {
     selectedSection,
     bookmarkedNums,
     flaggedNums,
-    customOrder
+    customOrder,
+    showingAnswer
   })
 
   useEffect(() => {
-    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, customOrder }
-  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, customOrder])
+    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, customOrder, showingAnswer }
+  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, customOrder, showingAnswer])
 
   useEffect(() => {
     getSession().then(session => {
@@ -154,136 +157,103 @@ export default function FlashcardApp() {
     }
     channel.bind('full-state', handleFullState)
 
-    // 3. Listen for deltas
-    const handleDeltaNavigate = (data: any) => {
-      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
-        setCurrentIndex(data.currentIndex)
-        setShowingAnswer(false)
-        setAnimating(false)
-        setTimeout(() => setAnimating(true), 10)
+    const applySyncState = (data: any) => {
+      if (data.url && data.url !== window.location.href) {
+        localStorage.setItem('pendingSyncState', JSON.stringify(data));
+        window.location.href = data.url;
+        return;
       }
+      
+      if (data.customOrder !== undefined) setCustomOrder(data.customOrder)
+      if (data.selectedSection !== undefined) setSelectedSection(data.selectedSection)
+      if (data.currentIndex !== undefined) setCurrentIndex(data.currentIndex)
+      if (data.showingAnswer !== undefined) setShowingAnswer(data.showingAnswer)
+      if (data.attemptLaterNums) setAttemptLaterNums(new Set(data.attemptLaterNums))
+      if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
+      if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
     }
-    channel.bind('delta-navigate', handleDeltaNavigate)
 
-    const handleDeltaSection = (data: any) => {
-      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
-        setSelectedSection(data.selectedSection)
-        setCurrentIndex(0)
-      }
+    // 3. Listen for manual sync
+    const handleForceSync = (data: any) => {
+      // Ignore self
+      if (data.senderSocketId === pusherSocketId.current) return;
+      applySyncState(data);
     }
-    channel.bind('delta-section', handleDeltaSection)
+    channel.bind('force-sync', handleForceSync)
 
-    const handleDeltaAttemptLater = (data: any) => {
-      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
-        setAttemptLaterNums(prev => {
-          const next = new Set(prev)
-          if (data.isAdding) next.add(data.originalNumber)
-          else next.delete(data.originalNumber)
-          return next
-        })
+    const handleSyncResponse = (data: any) => {
+      if (data.targetSocketId !== pusherSocketId.current) return;
+      if (pendingReceive.current) {
+        pendingReceive.current = false;
+        applySyncState(data);
       }
     }
-    channel.bind('delta-attempt-later', handleDeltaAttemptLater)
+    channel.bind('sync-response', handleSyncResponse)
 
-    const handleDeltaFlag = (data: any) => {
-      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
-        setFlaggedNums(prev => {
-          const next = new Set(prev)
-          if (data.isAdding) next.add(data.originalNumber)
-          else next.delete(data.originalNumber)
-          return next
-        })
-      }
+    const handleRequestSync = (data: any) => {
+      if (data.requesterSocketId === pusherSocketId.current) return;
+      const state = syncStateRef.current;
+      broadcastQuizEvent({
+        eventName: 'sync-response',
+        payload: {
+          url: window.location.href,
+          sourceLinkId,
+          currentIndex: state.currentIndex,
+          selectedSection: state.selectedSection,
+          showingAnswer: state.showingAnswer,
+          customOrder: state.customOrder,
+          attemptLaterNums: Array.from(state.attemptLaterNums),
+          bookmarkedNums: Array.from(state.bookmarkedNums),
+          flaggedNums: Array.from(state.flaggedNums),
+          targetSocketId: data.requesterSocketId
+        },
+        socketId: pusherSocketId.current || undefined
+      }).catch(console.error)
     }
-    channel.bind('delta-flag', handleDeltaFlag)
-
-    const handleDeltaBookmark = (data: any) => {
-      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
-        setBookmarkedNums(prev => {
-          const next = new Set(prev)
-          if (data.isAdding) next.add(data.originalNumber)
-          else next.delete(data.originalNumber)
-          return next
-        })
-      }
-    }
-    channel.bind('delta-bookmark', handleDeltaBookmark)
-
-    const handleDeltaOrder = (data: any) => {
-      if (sourceLinkId && data.sourceLinkId === sourceLinkId) {
-        setCustomOrder(data.customOrder || null)
-        setCurrentIndex(0)
-      }
-    }
-    channel.bind('delta-order', handleDeltaOrder)
+    channel.bind('request-sync', handleRequestSync)
 
     return () => {
       pusher.connection.unbind('connected', handleConnected)
       channel.unbind('request-full-state', handleRequestFullState)
       channel.unbind('full-state', handleFullState)
-      channel.unbind('delta-navigate', handleDeltaNavigate)
-      channel.unbind('delta-section', handleDeltaSection)
-      channel.unbind('delta-attempt-later', handleDeltaAttemptLater)
-      channel.unbind('delta-flag', handleDeltaFlag)
-      channel.unbind('delta-bookmark', handleDeltaBookmark)
-      channel.unbind('delta-order', handleDeltaOrder)
+      channel.unbind('force-sync', handleForceSync)
+      channel.unbind('sync-response', handleSyncResponse)
+      channel.unbind('request-sync', handleRequestSync)
     }
   }, [userId, sourceLinkId])
 
-  // Broadcast specific actions
-  const broadcastNavigate = useCallback((newIndex: number) => {
-    if (!sourceLinkId || !pusherSocketId.current) return
+  // Broadcast manual sync
+  const handleSendSync = useCallback(() => {
+    setShowSyncModal(false);
+    if (!pusherSocketId.current) return
     broadcastQuizEvent({
-      eventName: 'delta-navigate',
-      payload: { sourceLinkId, currentIndex: newIndex },
+      eventName: 'force-sync',
+      payload: { 
+        url: window.location.href,
+        sourceLinkId,
+        currentIndex,
+        selectedSection,
+        showingAnswer,
+        customOrder,
+        attemptLaterNums: Array.from(attemptLaterNums),
+        bookmarkedNums: Array.from(bookmarkedNums),
+        flaggedNums: Array.from(flaggedNums),
+        senderSocketId: pusherSocketId.current
+      },
       socketId: pusherSocketId.current
     }).catch(console.error)
-  }, [sourceLinkId])
+  }, [sourceLinkId, currentIndex, selectedSection, showingAnswer, customOrder, attemptLaterNums, bookmarkedNums, flaggedNums])
 
-  const broadcastSection = useCallback((section: string) => {
-    if (!sourceLinkId || !pusherSocketId.current) return
+  const handleReceiveSync = () => {
+    if (!pusherSocketId.current) return;
+    pendingReceive.current = true;
+    setShowSyncModal(false);
     broadcastQuizEvent({
-      eventName: 'delta-section',
-      payload: { sourceLinkId, selectedSection: section },
+      eventName: 'request-sync',
+      payload: { requesterSocketId: pusherSocketId.current },
       socketId: pusherSocketId.current
-    }).catch(console.error)
-  }, [sourceLinkId])
-
-  const broadcastAttemptLaterDelta = useCallback((originalNumber: number, isAdding: boolean) => {
-    if (!sourceLinkId || !pusherSocketId.current) return
-    broadcastQuizEvent({
-      eventName: 'delta-attempt-later',
-      payload: { sourceLinkId, originalNumber, isAdding },
-      socketId: pusherSocketId.current
-    }).catch(console.error)
-  }, [sourceLinkId])
-
-  const broadcastFlagDelta = useCallback((originalNumber: number, isAdding: boolean) => {
-    if (!sourceLinkId || !pusherSocketId.current) return
-    broadcastQuizEvent({
-      eventName: 'delta-flag',
-      payload: { sourceLinkId, originalNumber, isAdding },
-      socketId: pusherSocketId.current
-    }).catch(console.error)
-  }, [sourceLinkId])
-
-  const broadcastBookmarkDelta = useCallback((originalNumber: number, isAdding: boolean) => {
-    if (!sourceLinkId || !pusherSocketId.current) return
-    broadcastQuizEvent({
-      eventName: 'delta-bookmark',
-      payload: { sourceLinkId, originalNumber, isAdding },
-      socketId: pusherSocketId.current
-    }).catch(console.error)
-  }, [sourceLinkId])
-
-  const broadcastOrder = useCallback((order: number[] | null) => {
-    if (!sourceLinkId || !pusherSocketId.current) return
-    broadcastQuizEvent({
-      eventName: 'delta-order',
-      payload: { sourceLinkId, customOrder: order },
-      socketId: pusherSocketId.current
-    }).catch(console.error)
-  }, [sourceLinkId])
+    }).catch(console.error);
+  }
 
   async function fetchGDocText(url: string) {
     return await fetchGDocTextServer(url)
@@ -413,6 +383,26 @@ export default function FlashcardApp() {
             setFlaggedNums(flags)
           }
           parseTextContent(rawText, bms, flags)
+          
+          const pending = localStorage.getItem('pendingSyncState')
+          if (pending) {
+            try {
+              const data = JSON.parse(pending)
+              if (data.url === window.location.href) {
+                if (data.customOrder !== undefined) setCustomOrder(data.customOrder)
+                if (data.selectedSection !== undefined) setSelectedSection(data.selectedSection)
+                if (data.currentIndex !== undefined) setCurrentIndex(data.currentIndex)
+                if (data.showingAnswer !== undefined) setShowingAnswer(data.showingAnswer)
+                if (data.attemptLaterNums) setAttemptLaterNums(new Set(data.attemptLaterNums))
+                if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
+                if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
+              }
+            } catch (e) {
+              console.error('Failed to parse pending sync state', e)
+            } finally {
+              localStorage.removeItem('pendingSyncState')
+            }
+          }
         } else {
           setLoading(false)
         }
@@ -451,23 +441,21 @@ export default function FlashcardApp() {
     } else {
       const next = latestIndex < questions.length - 1 ? latestIndex + 1 : 0
       syncStateRef.current.currentIndex = next
-      broadcastNavigate(next)
       setCurrentIndex(next)
       setShowingAnswer(false)
       triggerAnimation()
     }
-  }, [questions, qOnlyMode, showingAnswer, broadcastNavigate])
+  }, [questions, qOnlyMode, showingAnswer])
 
   const handlePrev = useCallback(() => {
     if (questions.length === 0) return
     const latestIndex = syncStateRef.current.currentIndex
     const next = latestIndex > 0 ? latestIndex - 1 : questions.length - 1
     syncStateRef.current.currentIndex = next
-    broadcastNavigate(next)
     setCurrentIndex(next)
     setShowingAnswer(false)
     triggerAnimation()
-  }, [questions, broadcastNavigate])
+  }, [questions])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -494,12 +482,8 @@ export default function FlashcardApp() {
     }
     try {
       const isNowBookmarked = await toggleBookmarkState(sourceLinkId, card.originalNumber, card.prefix, card.q, card.a || '')
-      broadcastBookmarkDelta(card.originalNumber, isNowBookmarked)
       
       const wasFlagged = flaggedNums.has(card.originalNumber)
-      if (wasFlagged && isNowBookmarked) {
-        broadcastFlagDelta(card.originalNumber, false)
-      }
 
       setBookmarkedNums(prev => {
         const next = new Set(prev)
@@ -524,12 +508,8 @@ export default function FlashcardApp() {
     if (!sourceLinkId) return
     try {
       const isNowFlagged = await toggleBookmarkState(sourceLinkId, -card.originalNumber, card.prefix, card.q, card.a || '')
-      broadcastFlagDelta(card.originalNumber, isNowFlagged)
       
       const wasBookmarked = bookmarkedNums.has(card.originalNumber)
-      if (wasBookmarked && isNowFlagged) {
-        broadcastBookmarkDelta(card.originalNumber, false)
-      }
 
       setFlaggedNums(prev => {
         const next = new Set(prev)
@@ -567,7 +547,6 @@ export default function FlashcardApp() {
     const currentNum = questions[currentIndex].originalNumber
     
     const isAdding = !attemptLaterNums.has(currentNum)
-    broadcastAttemptLaterDelta(currentNum, isAdding)
 
     setAttemptLaterNums(prev => {
       const next = new Set(prev)
@@ -687,6 +666,20 @@ export default function FlashcardApp() {
 
   return (
     <div className="container">
+      {showSyncModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="panel" style={{ maxWidth: '400px', textAlign: 'center' }}>
+            <h3 style={{ marginTop: 0 }}>Sync State</h3>
+            <p style={{ margin: '1rem 0' }}>Do you want to send your current state to other devices, or receive the state from them?</p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button className="btn-primary" onClick={handleSendSync}>📤 Send to Others</button>
+              <button className="btn-primary" onClick={handleReceiveSync}>📥 Receive from Others</button>
+              <button className="secondary-btn" onClick={() => setShowSyncModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="app-header">
         <h1>{bookmarksOnly ? 'Bookmarked Questions' : 'Quiz Session'}</h1>
         <div className="header-actions">
@@ -707,7 +700,6 @@ export default function FlashcardApp() {
                   const val = parseInt(e.target.value)
                   if (!isNaN(val) && val >= 0 && val < questions.length) {
                     setCurrentIndex(val)
-                    broadcastNavigate(val)
                     setShowingAnswer(false)
                     triggerAnimation()
                   }
@@ -728,7 +720,6 @@ export default function FlashcardApp() {
                   const val = e.target.value
                   setSelectedSection(val)
                   setCurrentIndex(0)
-                  broadcastSection(val)
                   setShowingAnswer(false)
                   triggerAnimation()
                 }}
@@ -770,12 +761,14 @@ export default function FlashcardApp() {
               }
               const order = shuffled.map(q => q.originalNumber)
               setCustomOrder(order)
-              broadcastOrder(order)
               setQuestions(shuffled)
               setCurrentIndex(0)
               setShowingAnswer(false)
               triggerAnimation()
             }} title="Shuffle questions">🔀 Shuffle</button>
+            <button className="secondary-btn" onClick={() => setShowSyncModal(true)} title="Sync state to other devices">
+              🔄 Sync
+            </button>
           </div>
         </div>
 
