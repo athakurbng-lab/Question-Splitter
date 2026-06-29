@@ -40,6 +40,7 @@ export default function FlashcardApp() {
   const [animating, setAnimating] = useState(false)
   const [bookmarkedNums, setBookmarkedNums] = useState<Set<number>>(new Set())
   const [flaggedNums, setFlaggedNums] = useState<Set<number>>(new Set())
+  const [completedNums, setCompletedNums] = useState<Set<number>>(new Set())
   const [attemptLaterNums, setAttemptLaterNums] = useState<Set<number>>(new Set())
   const [timeSpent, setTimeSpent] = useState(0)
   const clickTimeout = useRef<NodeJS.Timeout | null>(null)
@@ -48,6 +49,7 @@ export default function FlashcardApp() {
   const hasReceivedFullState = useRef(false)
   const [customOrder, setCustomOrder] = useState<number[] | null>(null)
   const [showSyncModal, setShowSyncModal] = useState(false)
+  const [showMoreOptions, setShowMoreOptions] = useState(false)
   const pendingReceive = useRef(false)
 
   const syncStateRef = useRef({
@@ -56,13 +58,14 @@ export default function FlashcardApp() {
     selectedSection,
     bookmarkedNums,
     flaggedNums,
+    completedNums,
     customOrder,
     showingAnswer
   })
 
   useEffect(() => {
-    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, customOrder, showingAnswer }
-  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, customOrder, showingAnswer])
+    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, completedNums, customOrder, showingAnswer }
+  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, completedNums, customOrder, showingAnswer])
 
   useEffect(() => {
     getSession().then(session => {
@@ -119,7 +122,8 @@ export default function FlashcardApp() {
             attemptLaterNums: Array.from(refAttempt),
             selectedSection: refSection,
             bookmarkedNums: Array.from(refBookmarks),
-            flaggedNums: Array.from(refFlags)
+            flaggedNums: Array.from(refFlags),
+            completedNums: Array.from(syncStateRef.current.completedNums)
           }
           if (refOrder) payload.customOrder = refOrder
 
@@ -152,6 +156,7 @@ export default function FlashcardApp() {
         if (data.attemptLaterNums) setAttemptLaterNums(new Set(data.attemptLaterNums))
         if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
         if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
+        if (data.completedNums) setCompletedNums(new Set(data.completedNums))
         if (data.customOrder) setCustomOrder(data.customOrder)
       }
     }
@@ -171,6 +176,7 @@ export default function FlashcardApp() {
       if (data.attemptLaterNums) setAttemptLaterNums(new Set(data.attemptLaterNums))
       if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
       if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
+      if (data.completedNums) setCompletedNums(new Set(data.completedNums))
     }
 
     // 3. Listen for manual sync
@@ -205,6 +211,7 @@ export default function FlashcardApp() {
           attemptLaterNums: Array.from(state.attemptLaterNums),
           bookmarkedNums: Array.from(state.bookmarkedNums),
           flaggedNums: Array.from(state.flaggedNums),
+          completedNums: Array.from(state.completedNums),
           targetSocketId: data.requesterSocketId
         },
         socketId: pusherSocketId.current || undefined
@@ -238,11 +245,12 @@ export default function FlashcardApp() {
         attemptLaterNums: Array.from(attemptLaterNums),
         bookmarkedNums: Array.from(bookmarkedNums),
         flaggedNums: Array.from(flaggedNums),
+        completedNums: Array.from(completedNums),
         senderSocketId: pusherSocketId.current
       },
       socketId: pusherSocketId.current
     }).catch(console.error)
-  }, [sourceLinkId, currentIndex, selectedSection, showingAnswer, customOrder, attemptLaterNums, bookmarkedNums, flaggedNums])
+  }, [sourceLinkId, currentIndex, selectedSection, showingAnswer, customOrder, attemptLaterNums, bookmarkedNums, flaggedNums, completedNums])
 
   const handleReceiveSync = () => {
     if (!pusherSocketId.current) return;
@@ -375,12 +383,15 @@ export default function FlashcardApp() {
         if (rawText) {
           let bms = new Set<number>()
           let flags = new Set<number>()
+          let comps = new Set<number>()
           if (sid) {
             const nums = await getBookmarkedQuestionNumbers(sid)
-            bms = new Set(nums.filter(n => n > 0))
-            flags = new Set(nums.filter(n => n < 0).map(n => Math.abs(n)))
+            bms = new Set(nums.filter(n => n > 0 && n < 50000))
+            flags = new Set(nums.filter(n => n < 0 && n > -50000).map(n => Math.abs(n)))
+            comps = new Set(nums.filter(n => n >= 50000).map(n => n - 50000))
             setBookmarkedNums(bms)
             setFlaggedNums(flags)
+            setCompletedNums(comps)
           }
           parseTextContent(rawText, bms, flags)
           
@@ -396,6 +407,7 @@ export default function FlashcardApp() {
                 if (data.attemptLaterNums) setAttemptLaterNums(new Set(data.attemptLaterNums))
                 if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
                 if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
+                if (data.completedNums) setCompletedNums(new Set(data.completedNums))
               }
             } catch (e) {
               console.error('Failed to parse pending sync state', e)
@@ -529,6 +541,26 @@ export default function FlashcardApp() {
     }
   }
 
+  const handleCompleteToggle = async () => {
+    const card = questions[currentIndex]
+    if (!sourceLinkId) {
+      alert("Cannot complete custom text correctly without saving it properly yet.")
+      return
+    }
+    try {
+      const isNowCompleted = await toggleBookmarkState(sourceLinkId, card.originalNumber + 50000, card.prefix, card.q, card.a || '')
+      
+      setCompletedNums(prev => {
+        const next = new Set(prev)
+        if (isNowCompleted) next.add(card.originalNumber)
+        else next.delete(card.originalNumber)
+        return next
+      })
+    } catch {
+      alert('Failed to mark complete. Are you logged in?')
+    }
+  }
+
   const handleBookmarkAction = () => {
     if (clickTimeout.current) {
       clearTimeout(clickTimeout.current)
@@ -573,6 +605,12 @@ export default function FlashcardApp() {
         return;
       }
       filtered = filtered.filter(q => flaggedNums.has(q.originalNumber));
+    } else if (selectedSection === 'CompletedQuestions') {
+      if (completedNums.size === 0 && !bookmarksOnly) {
+        setSelectedSection('All');
+        return;
+      }
+      filtered = filtered.filter(q => completedNums.has(q.originalNumber));
     } else {
       if (selectedSection !== 'All') {
         filtered = filtered.filter(q => q.section === selectedSection);
@@ -663,6 +701,7 @@ export default function FlashcardApp() {
 
   const card = questions[currentIndex]
   const isBookmarked = bookmarkedNums.has(card?.originalNumber)
+  const isCompleted = completedNums.has(card?.originalNumber)
 
   return (
     <div className="container">
@@ -732,6 +771,9 @@ export default function FlashcardApp() {
                 {flaggedNums.size > 0 && !bookmarksOnly && (
                   <option value="FlaggedQuestions">🚩 Flagged ({flaggedNums.size})</option>
                 )}
+                {completedNums.size > 0 && !bookmarksOnly && (
+                  <option value="CompletedQuestions">✅ Completed ({completedNums.size})</option>
+                )}
               </select>
             )}
           </div>
@@ -753,27 +795,57 @@ export default function FlashcardApp() {
                 setShowingAnswer(false)
               }} /> Q-Only
             </label>
-            <button className="secondary-btn" onClick={() => {
-              const shuffled = [...questions]
-              for (let i = shuffled.length - 1; i > 0; i--) {
-                  const j = Math.floor(Math.random() * (i + 1));
-                  [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-              }
-              const order = shuffled.map(q => q.originalNumber)
-              setCustomOrder(order)
-              setQuestions(shuffled)
-              setCurrentIndex(0)
-              setShowingAnswer(false)
-              triggerAnimation()
-            }} title="Shuffle questions">🔀 Shuffle</button>
-            <button className="secondary-btn" onClick={() => setShowSyncModal(true)} title="Sync state to other devices">
-              🔄 Sync
+            <button 
+              className="secondary-btn" 
+              onClick={handleCompleteToggle} 
+              title={isCompleted ? "Remove complete status" : "Mark as complete"}
+              style={{ color: isCompleted ? '#22c55e' : 'inherit', borderColor: isCompleted ? '#22c55e' : 'inherit' }}
+            >
+              {isCompleted ? '✅ Completed' : '☑️ Complete'}
             </button>
+            <div style={{ position: 'relative' }}>
+              <button 
+                className="secondary-btn" 
+                onClick={() => setShowMoreOptions(!showMoreOptions)} 
+                title="More options"
+                style={{ minWidth: '40px', padding: '0.4rem 0.6rem' }}
+              >
+                ⋮
+              </button>
+              {showMoreOptions && (
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '5px', backgroundColor: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', zIndex: 10, boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                  <button className="secondary-btn" onClick={() => {
+                    setShowMoreOptions(false)
+                    const shuffled = [...questions]
+                    for (let i = shuffled.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                    }
+                    const order = shuffled.map(q => q.originalNumber)
+                    setCustomOrder(order)
+                    setQuestions(shuffled)
+                    setCurrentIndex(0)
+                    setShowingAnswer(false)
+                    triggerAnimation()
+                  }} title="Shuffle questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>🔀 Shuffle</button>
+                  <button className="secondary-btn" onClick={() => {
+                    setShowMoreOptions(false)
+                    setShowSyncModal(true)
+                  }} title="Sync state to other devices" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                    🔄 Sync
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {questions.length > 0 ? (
-          <div className={`flashcard ${animating ? 'animating' : ''}`} onDoubleClick={handleAttemptLaterToggle}>
+          <div 
+            className={`flashcard ${animating ? 'animating' : ''}`} 
+            onDoubleClick={handleAttemptLaterToggle}
+            style={{ borderColor: completedNums.has(card.originalNumber) ? '#22c55e' : 'var(--card-border)' }}
+          >
             <div className="q-number">
               {card.prefix} (Q{card.originalNumber})
               {attemptLaterNums.has(card.originalNumber) && (
@@ -784,6 +856,11 @@ export default function FlashcardApp() {
               {flaggedNums.has(card.originalNumber) && (
                 <span style={{ marginLeft: '10px', fontSize: '0.8em', color: '#ef4444', backgroundColor: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>
                   🚩 Flagged
+                </span>
+              )}
+              {completedNums.has(card.originalNumber) && (
+                <span style={{ marginLeft: '10px', fontSize: '0.8em', color: '#16a34a', backgroundColor: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}>
+                  ✅ Completed
                 </span>
               )}
             </div>
