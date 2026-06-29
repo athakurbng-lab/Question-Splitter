@@ -885,8 +885,11 @@ export default function FlashcardApp() {
               {showMoreOptions && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '5px', backgroundColor: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', zIndex: 10, boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
                   <button className="secondary-btn" onClick={() => {
+                    const currentCard = questions[currentIndex]
+                    if (currentCard) {
+                      targetOriginalNumRef.current = currentCard.originalNumber
+                    }
                     if (!hideCompleted) {
-                      const currentCard = questions[currentIndex]
                       if (currentCard && completedNums.has(currentCard.originalNumber)) {
                         setKeepVisibleNums(new Set([currentCard.originalNumber]))
                       }
@@ -901,6 +904,7 @@ export default function FlashcardApp() {
                     {hideCompleted ? '👁️ Show Completed' : '🙈 Hide Completed'}
                   </button>
                   <button className="secondary-btn" onClick={() => {
+                    const currentCard = questions[currentIndex]
                     setShowMoreOptions(false)
                     const shuffled = [...questions]
                     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -908,9 +912,11 @@ export default function FlashcardApp() {
                         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
                     }
                     const order = shuffled.map(q => q.originalNumber)
+                    if (currentCard) {
+                      targetOriginalNumRef.current = currentCard.originalNumber
+                    }
                     setCustomOrder(order)
                     setQuestions(shuffled)
-                    setCurrentIndex(0)
                     setShowingAnswer(false)
                     triggerAnimation()
                   }} title="Shuffle questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>🔀 Shuffle</button>
