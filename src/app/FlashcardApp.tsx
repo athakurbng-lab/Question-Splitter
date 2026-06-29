@@ -51,6 +51,7 @@ export default function FlashcardApp() {
   const [showSyncModal, setShowSyncModal] = useState(false)
   const [showMoreOptions, setShowMoreOptions] = useState(false)
   const [hideCompleted, setHideCompleted] = useState(false)
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false)
   const [keepVisibleNums, setKeepVisibleNums] = useState<Set<number>>(new Set())
   const targetOriginalNumRef = useRef<number | null>(null)
   const pendingReceive = useRef(false)
@@ -768,6 +769,20 @@ export default function FlashcardApp() {
         </div>
       )}
 
+      {showShortcutsModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="panel" style={{ maxWidth: '400px', textAlign: 'center', padding: '2rem' }}>
+            <h3 style={{ marginTop: 0 }}>Keyboard Shortcuts</h3>
+            <ul style={{ listStyle: 'none', padding: 0, margin: '1.5rem 0', textAlign: 'left' }}>
+              <li style={{ marginBottom: '1rem' }}><kbd>Space</kbd> or <kbd>Enter</kbd> : Next question / Show answer</li>
+              <li style={{ marginBottom: '1rem' }}><kbd>←</kbd> : Previous question</li>
+              <li style={{ marginBottom: '1rem' }}><kbd>C</kbd> + <kbd>Space</kbd> : Mark as complete</li>
+            </ul>
+            <button className="btn-primary" onClick={() => setShowShortcutsModal(false)}>Close</button>
+          </div>
+        </div>
+      )}
+
       <div className="app-header">
         <h1>{bookmarksOnly ? 'Bookmarked Questions' : 'Quiz Session'}</h1>
         <div className="header-actions">
@@ -905,6 +920,12 @@ export default function FlashcardApp() {
                   }} title="Sync state to other devices" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
                     🔄 Sync
                   </button>
+                  <button className="secondary-btn" onClick={() => {
+                    setShowMoreOptions(false)
+                    setShowShortcutsModal(true)
+                  }} title="View Keyboard Shortcuts" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                    ⌨️ Shortcuts
+                  </button>
                 </div>
               )}
             </div>
@@ -948,7 +969,6 @@ export default function FlashcardApp() {
 
         <div className="controls">
           <button className="btn-nav btn-prev" onClick={handlePrev}>← Previous</button>
-          <div className="hint" style={{ lineHeight: '1.6' }}>Press <kbd>Space</kbd> / <kbd>Enter</kbd> for next <br /> <kbd>C</kbd> + <kbd>Space</kbd> to complete</div>
           <button className="btn-nav" onClick={handleNext}>
             {(qOnlyMode || !card?.a || showingAnswer) ? 'Next Question →' : 'Show Answer →'}
           </button>
