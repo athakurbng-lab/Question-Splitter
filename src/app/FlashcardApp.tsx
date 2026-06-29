@@ -50,6 +50,9 @@ export default function FlashcardApp() {
   const [customOrder, setCustomOrder] = useState<number[] | null>(null)
   const [showSyncModal, setShowSyncModal] = useState(false)
   const [showMoreOptions, setShowMoreOptions] = useState(false)
+  const [hideCompleted, setHideCompleted] = useState(false)
+  const [keepVisibleNums, setKeepVisibleNums] = useState<Set<number>>(new Set())
+  const targetOriginalNumRef = useRef<number | null>(null)
   const pendingReceive = useRef(false)
 
   const syncStateRef = useRef({
@@ -451,23 +454,35 @@ export default function FlashcardApp() {
     if (!qOnlyMode && card && card.a && !showingAnswer) {
       setShowingAnswer(true)
     } else {
-      const next = latestIndex < questions.length - 1 ? latestIndex + 1 : 0
-      syncStateRef.current.currentIndex = next
-      setCurrentIndex(next)
+      const nextIdx = latestIndex < questions.length - 1 ? latestIndex + 1 : 0
+      
+      if (keepVisibleNums.size > 0) {
+        targetOriginalNumRef.current = questions[nextIdx].originalNumber
+        setKeepVisibleNums(new Set())
+      } else {
+        syncStateRef.current.currentIndex = nextIdx
+        setCurrentIndex(nextIdx)
+      }
       setShowingAnswer(false)
       triggerAnimation()
     }
-  }, [questions, qOnlyMode, showingAnswer])
+  }, [questions, qOnlyMode, showingAnswer, keepVisibleNums])
 
   const handlePrev = useCallback(() => {
     if (questions.length === 0) return
     const latestIndex = syncStateRef.current.currentIndex
-    const next = latestIndex > 0 ? latestIndex - 1 : questions.length - 1
-    syncStateRef.current.currentIndex = next
-    setCurrentIndex(next)
+    const nextIdx = latestIndex > 0 ? latestIndex - 1 : questions.length - 1
+    
+    if (keepVisibleNums.size > 0) {
+      targetOriginalNumRef.current = questions[nextIdx].originalNumber
+      setKeepVisibleNums(new Set())
+    } else {
+      syncStateRef.current.currentIndex = nextIdx
+      setCurrentIndex(nextIdx)
+    }
     setShowingAnswer(false)
     triggerAnimation()
-  }, [questions])
+  }, [questions, keepVisibleNums])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -556,6 +571,15 @@ export default function FlashcardApp() {
         else next.delete(card.originalNumber)
         return next
       })
+      
+      if (hideCompleted) {
+        setKeepVisibleNums(prev => {
+          const next = new Set(prev)
+          if (isNowCompleted) next.add(card.originalNumber)
+          else next.delete(card.originalNumber)
+          return next
+        })
+      }
     } catch {
       alert('Failed to mark complete. Are you logged in?')
     }
@@ -618,6 +642,10 @@ export default function FlashcardApp() {
       filtered = filtered.filter(q => !flaggedNums.has(q.originalNumber));
     }
 
+    if (hideCompleted) {
+      filtered = filtered.filter(q => !completedNums.has(q.originalNumber) || keepVisibleNums.has(q.originalNumber));
+    }
+
     if (customOrder) {
       const orderMap = new Map(customOrder.map((num, i) => [num, i]))
       filtered.sort((a, b) => {
@@ -630,9 +658,14 @@ export default function FlashcardApp() {
     setQuestions(filtered);
     setCurrentIndex(prev => {
       if (filtered.length === 0) return 0;
+      if (targetOriginalNumRef.current !== null) {
+        const idx = filtered.findIndex(q => q.originalNumber === targetOriginalNumRef.current);
+        targetOriginalNumRef.current = null;
+        if (idx !== -1) return idx;
+      }
       return Math.max(0, Math.min(prev, filtered.length - 1));
     });
-  }, [selectedSection, attemptLaterNums, flaggedNums, allQuestions, bookmarksOnly, customOrder]);
+  }, [selectedSection, attemptLaterNums, flaggedNums, allQuestions, bookmarksOnly, customOrder, completedNums, hideCompleted, keepVisibleNums]);
 
   useEffect(() => {
     setTimeSpent(0)
@@ -738,7 +771,12 @@ export default function FlashcardApp() {
                 onChange={e => {
                   const val = parseInt(e.target.value)
                   if (!isNaN(val) && val >= 0 && val < questions.length) {
-                    setCurrentIndex(val)
+                    if (keepVisibleNums.size > 0) {
+                      targetOriginalNumRef.current = questions[val].originalNumber
+                      setKeepVisibleNums(new Set())
+                    } else {
+                      setCurrentIndex(val)
+                    }
                     setShowingAnswer(false)
                     triggerAnimation()
                   }
@@ -758,6 +796,7 @@ export default function FlashcardApp() {
                 onChange={e => {
                   const val = e.target.value
                   setSelectedSection(val)
+                  setKeepVisibleNums(new Set())
                   setCurrentIndex(0)
                   setShowingAnswer(false)
                   triggerAnimation()
@@ -814,6 +853,22 @@ export default function FlashcardApp() {
               </button>
               {showMoreOptions && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '5px', backgroundColor: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', zIndex: 10, boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                  <button className="secondary-btn" onClick={() => {
+                    if (!hideCompleted) {
+                      const currentCard = questions[currentIndex]
+                      if (currentCard && completedNums.has(currentCard.originalNumber)) {
+                        setKeepVisibleNums(new Set([currentCard.originalNumber]))
+                      }
+                    } else {
+                      setKeepVisibleNums(new Set())
+                    }
+                    setHideCompleted(!hideCompleted)
+                    setShowMoreOptions(false)
+                    setShowingAnswer(false)
+                    triggerAnimation()
+                  }} title="Toggle hiding completed questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                    {hideCompleted ? '👁️ Show Completed' : '🙈 Hide Completed'}
+                  </button>
                   <button className="secondary-btn" onClick={() => {
                     setShowMoreOptions(false)
                     const shuffled = [...questions]
