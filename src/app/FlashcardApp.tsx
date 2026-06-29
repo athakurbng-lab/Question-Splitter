@@ -484,12 +484,48 @@ export default function FlashcardApp() {
     triggerAnimation()
   }, [questions, keepVisibleNums])
 
+  const handleCompleteToggle = useCallback(async () => {
+    const card = questions[currentIndex]
+    if (!sourceLinkId) {
+      alert("Cannot complete custom text correctly without saving it properly yet.")
+      return
+    }
+    try {
+      const isNowCompleted = await toggleBookmarkState(sourceLinkId, card.originalNumber + 50000, card.prefix, card.q, card.a || '')
+      
+      setCompletedNums(prev => {
+        const next = new Set(prev)
+        if (isNowCompleted) next.add(card.originalNumber)
+        else next.delete(card.originalNumber)
+        return next
+      })
+      
+      if (hideCompleted) {
+        setKeepVisibleNums(prev => {
+          const next = new Set(prev)
+          if (isNowCompleted) next.add(card.originalNumber)
+          else next.delete(card.originalNumber)
+          return next
+        })
+      }
+    } catch {
+      alert('Failed to mark complete. Are you logged in?')
+    }
+  }, [questions, currentIndex, sourceLinkId, hideCompleted])
+
+  const pressedKeys = useRef<Set<string>>(new Set())
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      pressedKeys.current.add(e.key.toLowerCase())
+
       if (allQuestions.length === 0) return
       if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA' || (e.target as HTMLElement).tagName === 'SELECT') return
 
-      if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') {
+      if (e.key === ' ' && pressedKeys.current.has('c')) {
+        e.preventDefault()
+        handleCompleteToggle()
+      } else if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') {
         e.preventDefault()
         handleNext()
       } else if (e.key === 'ArrowLeft') {
@@ -497,9 +533,18 @@ export default function FlashcardApp() {
         handlePrev()
       }
     }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      pressedKeys.current.delete(e.key.toLowerCase())
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleNext, handlePrev, allQuestions.length])
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [handleNext, handlePrev, handleCompleteToggle, allQuestions.length])
 
   const handleBookmarkToggle = async () => {
     const card = questions[currentIndex]
@@ -553,35 +598,6 @@ export default function FlashcardApp() {
       })
     } catch {
       alert('Failed to flag. Are you logged in?')
-    }
-  }
-
-  const handleCompleteToggle = async () => {
-    const card = questions[currentIndex]
-    if (!sourceLinkId) {
-      alert("Cannot complete custom text correctly without saving it properly yet.")
-      return
-    }
-    try {
-      const isNowCompleted = await toggleBookmarkState(sourceLinkId, card.originalNumber + 50000, card.prefix, card.q, card.a || '')
-      
-      setCompletedNums(prev => {
-        const next = new Set(prev)
-        if (isNowCompleted) next.add(card.originalNumber)
-        else next.delete(card.originalNumber)
-        return next
-      })
-      
-      if (hideCompleted) {
-        setKeepVisibleNums(prev => {
-          const next = new Set(prev)
-          if (isNowCompleted) next.add(card.originalNumber)
-          else next.delete(card.originalNumber)
-          return next
-        })
-      }
-    } catch {
-      alert('Failed to mark complete. Are you logged in?')
     }
   }
 
@@ -932,7 +948,7 @@ export default function FlashcardApp() {
 
         <div className="controls">
           <button className="btn-nav btn-prev" onClick={handlePrev}>← Previous</button>
-          <div className="hint">Press <kbd>Space</kbd> or <kbd>Enter</kbd> for next</div>
+          <div className="hint">Press <kbd>Space</kbd> or <kbd>Enter</kbd> for next. Press <kbd>C</kbd>+<kbd>Space</kbd> to complete.</div>
           <button className="btn-nav" onClick={handleNext}>
             {(qOnlyMode || !card?.a || showingAnswer) ? 'Next Question →' : 'Show Answer →'}
           </button>
