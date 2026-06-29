@@ -948,7 +948,7 @@ export default function FlashcardApp() {
 
         <div className="controls">
           <button className="btn-nav btn-prev" onClick={handlePrev}>← Previous</button>
-          <div className="hint">Press <kbd>Space</kbd> or <kbd>Enter</kbd> for next. Press <kbd>C</kbd>+<kbd>Space</kbd> to complete.</div>
+          <div className="hint" style={{ lineHeight: '1.6' }}>Press <kbd>Space</kbd> / <kbd>Enter</kbd> for next <br /> <kbd>C</kbd> + <kbd>Space</kbd> to complete</div>
           <button className="btn-nav" onClick={handleNext}>
             {(qOnlyMode || !card?.a || showingAnswer) ? 'Next Question →' : 'Show Answer →'}
           </button>
