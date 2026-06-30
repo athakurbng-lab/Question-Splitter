@@ -65,12 +65,13 @@ export default function FlashcardApp() {
     flaggedNums,
     completedNums,
     customOrder,
-    showingAnswer
+    showingAnswer,
+    hideCompleted
   })
 
   useEffect(() => {
-    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, completedNums, customOrder, showingAnswer }
-  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, completedNums, customOrder, showingAnswer])
+    syncStateRef.current = { currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, completedNums, customOrder, showingAnswer, hideCompleted }
+  }, [currentIndex, attemptLaterNums, selectedSection, bookmarkedNums, flaggedNums, completedNums, customOrder, showingAnswer, hideCompleted])
 
   useEffect(() => {
     getSession().then(session => {
@@ -128,7 +129,8 @@ export default function FlashcardApp() {
             selectedSection: refSection,
             bookmarkedNums: Array.from(refBookmarks),
             flaggedNums: Array.from(refFlags),
-            completedNums: Array.from(syncStateRef.current.completedNums)
+            completedNums: Array.from(syncStateRef.current.completedNums),
+            hideCompleted: syncStateRef.current.hideCompleted
           }
           if (refOrder) payload.customOrder = refOrder
 
@@ -163,6 +165,7 @@ export default function FlashcardApp() {
         if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
         if (data.completedNums) setCompletedNums(new Set(data.completedNums))
         if (data.customOrder) setCustomOrder(data.customOrder)
+        if (data.hideCompleted !== undefined) setHideCompleted(data.hideCompleted)
       }
     }
     channel.bind('full-state', handleFullState)
@@ -182,6 +185,7 @@ export default function FlashcardApp() {
       if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
       if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
       if (data.completedNums) setCompletedNums(new Set(data.completedNums))
+      if (data.hideCompleted !== undefined) setHideCompleted(data.hideCompleted)
     }
 
     // 3. Listen for manual sync
@@ -217,6 +221,7 @@ export default function FlashcardApp() {
           bookmarkedNums: Array.from(state.bookmarkedNums),
           flaggedNums: Array.from(state.flaggedNums),
           completedNums: Array.from(state.completedNums),
+          hideCompleted: state.hideCompleted,
           targetSocketId: data.requesterSocketId
         },
         socketId: pusherSocketId.current || undefined
@@ -251,6 +256,7 @@ export default function FlashcardApp() {
         bookmarkedNums: Array.from(bookmarkedNums),
         flaggedNums: Array.from(flaggedNums),
         completedNums: Array.from(completedNums),
+        hideCompleted,
         senderSocketId: pusherSocketId.current
       },
       socketId: pusherSocketId.current
@@ -418,6 +424,7 @@ export default function FlashcardApp() {
                 if (data.bookmarkedNums) setBookmarkedNums(new Set(data.bookmarkedNums))
                 if (data.flaggedNums) setFlaggedNums(new Set(data.flaggedNums))
                 if (data.completedNums) setCompletedNums(new Set(data.completedNums))
+                if (data.hideCompleted !== undefined) setHideCompleted(data.hideCompleted)
               }
             } catch (e) {
               console.error('Failed to parse pending sync state', e)
