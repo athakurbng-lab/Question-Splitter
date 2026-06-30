@@ -52,6 +52,7 @@ export default function FlashcardApp() {
   const [showMoreOptions, setShowMoreOptions] = useState(false)
   const [hideCompleted, setHideCompleted] = useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = useState(false)
+  const [checkpointNum, setCheckpointNum] = useState<number | null>(null)
   const [keepVisibleNums, setKeepVisibleNums] = useState<Set<number>>(new Set())
   const targetOriginalNumRef = useRef<number | null>(null)
   const pendingReceive = useRef(false)
@@ -390,9 +391,14 @@ export default function FlashcardApp() {
           let comps = new Set<number>()
           if (sid) {
             const nums = await getBookmarkedQuestionNumbers(sid)
-            bms = new Set(nums.filter(n => n > 0 && n < 50000))
+            const bmsRaw = nums.filter(n => n > 0 && n < 25000)
+            const chkRaw = nums.filter(n => n > 25000 && n < 50000)
+            bms = new Set(bmsRaw)
             flags = new Set(nums.filter(n => n < 0 && n > -50000).map(n => Math.abs(n)))
             comps = new Set(nums.filter(n => n >= 50000).map(n => n - 50000))
+            if (chkRaw.length > 0) {
+              setCheckpointNum(chkRaw[0] - 25000)
+            }
             setBookmarkedNums(bms)
             setFlaggedNums(flags)
             setCompletedNums(comps)
@@ -920,6 +926,38 @@ export default function FlashcardApp() {
                     setShowingAnswer(false)
                     triggerAnimation()
                   }} title="Shuffle questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>🔀 Shuffle</button>
+                  <button className="secondary-btn" onClick={async () => {
+                    setShowMoreOptions(false)
+                    if (!sourceLinkId) {
+                      alert("Cannot save checkpoint for custom text yet.")
+                      return
+                    }
+                    const currentCard = questions[currentIndex]
+                    if (!currentCard) return
+                    try {
+                      if (checkpointNum) {
+                        await toggleBookmarkState(sourceLinkId, 25000 + checkpointNum, "CHK", "", "")
+                      }
+                      await toggleBookmarkState(sourceLinkId, 25000 + currentCard.originalNumber, currentCard.prefix, currentCard.q, currentCard.a || '')
+                      setCheckpointNum(currentCard.originalNumber)
+                    } catch {
+                      alert('Failed to set checkpoint.')
+                    }
+                  }} title="Set current question as checkpoint" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                    📍 Add Checkpoint
+                  </button>
+                  {checkpointNum && (
+                    <button className="secondary-btn" onClick={() => {
+                      setShowMoreOptions(false)
+                      targetOriginalNumRef.current = checkpointNum
+                      if (selectedSection !== 'All') setSelectedSection('All')
+                      if (hideCompleted) setHideCompleted(false)
+                      setShowingAnswer(false)
+                      triggerAnimation()
+                    }} title="Go to checkpoint" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                      🚀 Go To Checkpoint
+                    </button>
+                  )}
                   <button className="secondary-btn" onClick={() => {
                     setShowMoreOptions(false)
                     setShowSyncModal(true)
