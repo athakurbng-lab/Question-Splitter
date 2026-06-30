@@ -883,7 +883,7 @@ export default function FlashcardApp() {
                 ⋮
               </button>
               {showMoreOptions && (
-                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '5px', backgroundColor: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', zIndex: 10, boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                <div className="more-options-dropdown">
                   <button className="secondary-btn" onClick={() => {
                     const currentCard = questions[currentIndex]
                     if (currentCard) {
