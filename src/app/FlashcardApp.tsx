@@ -56,6 +56,10 @@ export default function FlashcardApp() {
   const [keepVisibleNums, setKeepVisibleNums] = useState<Set<number>>(new Set())
   const targetOriginalNumRef = useRef<number | null>(null)
   const pendingReceive = useRef(false)
+  const [isAutoDarkEnabled, setIsAutoDarkEnabled] = useState(false)
+  const [autoDarkSeconds, setAutoDarkSeconds] = useState(3)
+  const [isScreenDark, setIsScreenDark] = useState(false)
+  const lastInteractionTime = useRef<number>(Date.now())
 
   const syncStateRef = useRef({
     currentIndex,
@@ -445,6 +449,40 @@ export default function FlashcardApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceParam, urlParam, customParam])
 
+  // Auto Dark Mode Logic
+  useEffect(() => {
+    if (!isAutoDarkEnabled) {
+      setIsScreenDark(false);
+      return;
+    }
+    
+    const handleInteraction = () => {
+      lastInteractionTime.current = Date.now()
+      setIsScreenDark(false)
+    }
+
+    window.addEventListener('pointermove', handleInteraction)
+    window.addEventListener('keydown', handleInteraction)
+    window.addEventListener('touchstart', handleInteraction)
+    window.addEventListener('click', handleInteraction)
+
+    handleInteraction()
+
+    const interval = setInterval(() => {
+      if (Date.now() - lastInteractionTime.current >= autoDarkSeconds * 1000) {
+        setIsScreenDark(true)
+      }
+    }, 500)
+
+    return () => {
+      window.removeEventListener('pointermove', handleInteraction)
+      window.removeEventListener('keydown', handleInteraction)
+      window.removeEventListener('touchstart', handleInteraction)
+      window.removeEventListener('click', handleInteraction)
+      clearInterval(interval)
+    }
+  }, [isAutoDarkEnabled, autoDarkSeconds])
+
   // Resuming
   useEffect(() => {
     if (sourceLinkId && questions.length > 0 && allQuestions.length > 0) {
@@ -768,6 +806,25 @@ export default function FlashcardApp() {
 
   return (
     <div className="container">
+      {isScreenDark && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'black',
+            zIndex: 9999
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setIsScreenDark(false);
+            lastInteractionTime.current = Date.now();
+          }}
+        />
+      )}
       {showSyncModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div className="panel" style={{ maxWidth: '400px', textAlign: 'center' }}>
@@ -801,6 +858,22 @@ export default function FlashcardApp() {
         <div className="header-actions">
           <Link href={bookmarksOnly ? "/bookmarks" : "/take-quiz"} onClick={handleLinkClick} className="secondary-btn">Back</Link>
           <Link href="/dashboard" onClick={handleLinkClick} className="secondary-btn">Dashboard</Link>
+          <button 
+            className="secondary-btn" 
+            onClick={() => setIsAutoDarkEnabled(prev => !prev)}
+            onDoubleClick={() => {
+              const val = prompt('Enter auto dark timeout in seconds:', autoDarkSeconds.toString())
+              if (val) {
+                const parsed = parseInt(val)
+                if (!isNaN(parsed) && parsed > 0) {
+                  setAutoDarkSeconds(parsed)
+                }
+              }
+            }}
+            title="Double click to set timeout"
+          >
+            🌙 Auto Dark: {isAutoDarkEnabled ? 'ON' : 'OFF'}
+          </button>
         </div>
       </div>
 
