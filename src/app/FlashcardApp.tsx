@@ -50,6 +50,7 @@ export default function FlashcardApp() {
   const [customOrder, setCustomOrder] = useState<number[] | null>(null)
   const [showSyncModal, setShowSyncModal] = useState(false)
   const [showMoreOptions, setShowMoreOptions] = useState(false)
+  const [showCheckpointSubmenu, setShowCheckpointSubmenu] = useState(false)
   const [hideCompleted, setHideCompleted] = useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = useState(false)
   const [checkpointNum, setCheckpointNum] = useState<number | null>(null)
@@ -970,86 +971,115 @@ export default function FlashcardApp() {
               </button>
               {showMoreOptions && (
                 <div className="more-options-dropdown">
-                  <button className="secondary-btn" onClick={() => {
-                    const currentCard = questions[currentIndex]
-                    if (currentCard) {
-                      targetOriginalNumRef.current = currentCard.originalNumber
-                    }
-                    if (!hideCompleted) {
-                      if (currentCard && completedNums.has(currentCard.originalNumber)) {
-                        setKeepVisibleNums(new Set([currentCard.originalNumber]))
-                      }
-                    } else {
-                      setKeepVisibleNums(new Set())
-                    }
-                    setHideCompleted(!hideCompleted)
-                    setShowMoreOptions(false)
-                    setShowingAnswer(false)
-                    triggerAnimation()
-                  }} title="Toggle hiding completed questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
-                    {hideCompleted ? '👁️ Show Completed' : '🙈 Hide Completed'}
-                  </button>
-                  <button className="secondary-btn" onClick={() => {
-                    const currentCard = questions[currentIndex]
-                    setShowMoreOptions(false)
-                    const shuffled = [...questions]
-                    for (let i = shuffled.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                    }
-                    const order = shuffled.map(q => q.originalNumber)
-                    if (currentCard) {
-                      targetOriginalNumRef.current = currentCard.originalNumber
-                    }
-                    setCustomOrder(order)
-                    setQuestions(shuffled)
-                    setShowingAnswer(false)
-                    triggerAnimation()
-                  }} title="Shuffle questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>🔀 Shuffle</button>
-                  <button className="secondary-btn" onClick={async () => {
-                    setShowMoreOptions(false)
-                    if (!sourceLinkId) {
-                      alert("Cannot save checkpoint for custom text yet.")
-                      return
-                    }
-                    const currentCard = questions[currentIndex]
-                    if (!currentCard) return
-                    try {
-                      if (checkpointNum) {
-                        await toggleBookmarkState(sourceLinkId, 25000 + checkpointNum, "CHK", "", "")
-                      }
-                      await toggleBookmarkState(sourceLinkId, 25000 + currentCard.originalNumber, currentCard.prefix, currentCard.q, currentCard.a || '')
-                      setCheckpointNum(currentCard.originalNumber)
-                    } catch {
-                      alert('Failed to set checkpoint.')
-                    }
-                  }} title="Set current question as checkpoint" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
-                    📍 Add Checkpoint
-                  </button>
-                  {checkpointNum && (
-                    <button className="secondary-btn" onClick={() => {
-                      setShowMoreOptions(false)
-                      targetOriginalNumRef.current = checkpointNum
-                      if (selectedSection !== 'All') setSelectedSection('All')
-                      if (hideCompleted) setHideCompleted(false)
-                      setShowingAnswer(false)
-                      triggerAnimation()
-                    }} title="Go to checkpoint" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
-                      🚀 Go To Checkpoint
-                    </button>
+                  {!showCheckpointSubmenu ? (
+                    <>
+                      <button className="secondary-btn" onClick={() => {
+                        const currentCard = questions[currentIndex]
+                        if (currentCard) {
+                          targetOriginalNumRef.current = currentCard.originalNumber
+                        }
+                        if (!hideCompleted) {
+                          if (currentCard && completedNums.has(currentCard.originalNumber)) {
+                            setKeepVisibleNums(new Set([currentCard.originalNumber]))
+                          }
+                        } else {
+                          setKeepVisibleNums(new Set())
+                        }
+                        setHideCompleted(!hideCompleted)
+                        setShowMoreOptions(false)
+                        setShowingAnswer(false)
+                        triggerAnimation()
+                      }} title="Toggle hiding completed questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                        {hideCompleted ? '👁️ Show Completed' : '🙈 Hide Completed'}
+                      </button>
+                      <button className="secondary-btn" onClick={() => {
+                        const currentCard = questions[currentIndex]
+                        setShowMoreOptions(false)
+                        const shuffled = [...questions]
+                        for (let i = shuffled.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                        }
+                        const order = shuffled.map(q => q.originalNumber)
+                        if (currentCard) {
+                          targetOriginalNumRef.current = currentCard.originalNumber
+                        }
+                        setCustomOrder(order)
+                        setQuestions(shuffled)
+                        setShowingAnswer(false)
+                        triggerAnimation()
+                      }} title="Shuffle questions" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>🔀 Shuffle</button>
+                      
+                      <button className="secondary-btn" onClick={() => {
+                        setShowCheckpointSubmenu(true)
+                      }} title="Checkpoint options" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                        📍 Checkpoint
+                      </button>
+
+                      <button className="secondary-btn" onClick={() => {
+                        setShowMoreOptions(false)
+                        setShowSyncModal(true)
+                      }} title="Sync state to other devices" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                        🔄 Sync
+                      </button>
+                      <button className="secondary-btn" onClick={() => {
+                        setShowMoreOptions(false)
+                        setShowShortcutsModal(true)
+                      }} title="View Keyboard Shortcuts" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                        ⌨️ Shortcuts
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="secondary-btn" onClick={() => setShowCheckpointSubmenu(false)} style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                        ⬅️ Back
+                      </button>
+                      <button className="secondary-btn" onClick={async () => {
+                        setShowMoreOptions(false)
+                        setShowCheckpointSubmenu(false)
+                        if (!sourceLinkId) {
+                          alert("Cannot save checkpoint for custom text yet.")
+                          return
+                        }
+                        const currentCard = questions[currentIndex]
+                        if (!currentCard) return
+                        try {
+                          if (checkpointNum) {
+                            await toggleBookmarkState(sourceLinkId, 25000 + checkpointNum, "CHK", "", "")
+                          }
+                          await toggleBookmarkState(sourceLinkId, 25000 + currentCard.originalNumber, currentCard.prefix, currentCard.q, currentCard.a || '')
+                          setCheckpointNum(currentCard.originalNumber)
+                        } catch {
+                          alert('Failed to set checkpoint.')
+                        }
+                      }} title="Set current question as checkpoint" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                        ➕ Add Checkpoint
+                      </button>
+                      {checkpointNum && (
+                        <button className="secondary-btn" onClick={() => {
+                          setShowMoreOptions(false)
+                          setShowCheckpointSubmenu(false)
+                          
+                          if (selectedSection !== 'All' || hideCompleted) {
+                            targetOriginalNumRef.current = checkpointNum
+                            setSelectedSection('All')
+                            setHideCompleted(false)
+                          } else {
+                            const idx = questions.findIndex(q => q.originalNumber === checkpointNum)
+                            if (idx !== -1) {
+                              setCurrentIndex(idx)
+                            } else {
+                              alert("Checkpoint not found!")
+                            }
+                          }
+                          setShowingAnswer(false)
+                          triggerAnimation()
+                        }} title="Go to checkpoint" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
+                          🚀 Go To Checkpoint
+                        </button>
+                      )}
+                    </>
                   )}
-                  <button className="secondary-btn" onClick={() => {
-                    setShowMoreOptions(false)
-                    setShowSyncModal(true)
-                  }} title="Sync state to other devices" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
-                    🔄 Sync
-                  </button>
-                  <button className="secondary-btn" onClick={() => {
-                    setShowMoreOptions(false)
-                    setShowShortcutsModal(true)
-                  }} title="View Keyboard Shortcuts" style={{ whiteSpace: 'nowrap', width: '100%', justifyContent: 'flex-start' }}>
-                    ⌨️ Shortcuts
-                  </button>
                 </div>
               )}
             </div>
